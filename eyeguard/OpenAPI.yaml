@@ -1,0 +1,649 @@
+﻿# Software-only simulation / demo — no real systems will be contacted or modified.
+openapi: 3.0.3
+info:
+  title: EyeGuard API
+  version: 1.0.0
+  description: |
+    Software-only simulation REST API for the EyeGuard SOC training platform.
+servers:
+  - url: https://localhost:8000
+    description: Local FastAPI dev server
+paths:
+  /api/v1/health:
+    get:
+      summary: Health probe
+      operationId: healthCheck
+      responses:
+        '200':
+          description: System health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealth'
+  /api/v1/search:
+    get:
+      summary: Aggregate IP reputation
+      operationId: searchIp
+      parameters:
+        - name: ip
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Normalized IP intelligence response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IpReputation'
+        '400':
+          description: Invalid IP or request error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/devices:
+    get:
+      summary: List devices
+      operationId: listDevices
+      responses:
+        '200':
+          description: Devices collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+    post:
+      summary: Create simulated device
+      operationId: createDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCreate'
+      responses:
+        '201':
+          description: Device created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '409':
+          description: Duplicate IP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/devices/{deviceId}:
+    get:
+      summary: Retrieve device detail
+      operationId: getDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Device details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update device metadata
+      operationId: updateDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceUpdate'
+      responses:
+        '200':
+          description: Updated device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+  /api/v1/devices/{deviceId}/block:
+    post:
+      summary: Toggle automatic block
+      operationId: blockDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Device block toggled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+  /api/v1/alerts:
+    get:
+      summary: List alerts
+      operationId: listAlerts
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [Low, Medium, High]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Open, Acknowledged, Resolved]
+      responses:
+        '200':
+          description: Alert list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Alert'
+    post:
+      summary: Create manual alert
+      operationId: createAlert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertCreate'
+      responses:
+        '201':
+          description: Alert created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+  /api/v1/alerts/{alertId}:
+    get:
+      summary: Alert detail
+      operationId: getAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          description: Alert detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertDetail'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/alerts/{alertId}/status:
+    post:
+      summary: Update alert status
+      operationId: updateAlertStatus
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [Open, Acknowledged, Resolved]
+      responses:
+        '200':
+          description: Updated alert
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+  /api/v1/reports:
+    get:
+      summary: List reports
+      operationId: listReports
+      responses:
+        '200':
+          description: Reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Report'
+  /api/v1/reports/{reportId}:
+    get:
+      summary: Report detail
+      operationId: getReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Report detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportDetail'
+  /api/v1/reports/{reportId}/export.csv:
+    get:
+      summary: Export report CSV
+      operationId: exportReportCsv
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+  /api/v1/reports/{reportId}/export.pdf:
+    get:
+      summary: Export report PDF
+      operationId: exportReportPdf
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+  /api/v1/simulation/devices:
+    post:
+      summary: Add simulated device to session
+      operationId: addSimulationDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationDeviceCreate'
+      responses:
+        '201':
+          description: Simulation device created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationDevice'
+  /api/v1/simulation/terminal:
+    post:
+      summary: Execute terminal command
+      operationId: executeSimulationCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminalCommandRequest'
+      responses:
+        '200':
+          description: Command execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalCommandResponse'
+  /api/v1/settings/users:
+    get:
+      summary: List active users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+    post:
+      summary: Submit signup request
+      operationId: requestSignup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSignupRequest'
+      responses:
+        '202':
+          description: Signup queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSignupQueued'
+  /api/v1/settings/users/pending:
+    get:
+      summary: List pending signup requests
+      operationId: listPendingSignups
+      responses:
+        '200':
+          description: Pending requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    request_id:
+                      type: string
+                      format: uuid
+                    email:
+                      type: string
+                    role:
+                      type: string
+  /api/v1/settings/users/{requestId}/approve:
+    post:
+      summary: Approve signup
+      operationId: approveSignup
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: User activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+  /api/v1/settings/users/{requestId}/reject:
+    post:
+      summary: Reject signup
+      operationId: rejectSignup
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Signup rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRejection'
+components:
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    SystemHealth:
+      type: object
+      properties:
+        status:
+          type: string
+        components:
+          type: object
+          additionalProperties:
+            type: string
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ip_address:
+          type: string
+        hostname:
+          type: string
+        device_type:
+          type: string
+        owner_role:
+          type: string
+        traffic_gb:
+          type: number
+        status:
+          type: string
+        last_seen_at:
+          type: string
+          format: date-time
+    DeviceCreate:
+      type: object
+      required: [ip_address, hostname, device_type, owner_role]
+      properties:
+        ip_address:
+          type: string
+        hostname:
+          type: string
+        device_type:
+          type: string
+        owner_role:
+          type: string
+        traffic_gb:
+          type: number
+    DeviceUpdate:
+      type: object
+      properties:
+        hostname:
+          type: string
+        device_type:
+          type: string
+        owner_role:
+          type: string
+        traffic_gb:
+          type: number
+        status:
+          type: string
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        detected_at:
+          type: string
+          format: date-time
+        source_ip:
+          type: string
+        destination_ip:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        status:
+          type: string
+        rationale:
+          type: string
+        action_taken:
+          type: string
+    AlertCreate:
+      type: object
+      required: [source_ip, category, severity]
+      properties:
+        source_ip:
+          type: string
+        destination_ip:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        rationale:
+          type: string
+    AlertDetail:
+      allOf:
+        - $ref: '#/components/schemas/Alert'
+        - type: object
+          properties:
+            events:
+              type: array
+              items:
+                type: object
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        alert_id:
+          type: string
+          format: uuid
+        summary:
+          type: string
+        remediation_steps:
+          type: string
+        indicators:
+          type: array
+          items:
+            type: string
+    ReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/Report'
+    SimulationDeviceCreate:
+      type: object
+      required: [ip_address, hostname, traffic_gb]
+      properties:
+        ip_address:
+          type: string
+        hostname:
+          type: string
+        traffic_gb:
+          type: number
+        device_type:
+          type: string
+    SimulationDevice:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        device:
+          $ref: '#/components/schemas/Device'
+    TerminalCommandRequest:
+      type: object
+      required: [session_id, command]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        command:
+          type: string
+    TerminalCommandResponse:
+      type: object
+      properties:
+        output:
+          type: string
+        alerts_triggered:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+    UserSignupRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+    UserSignupQueued:
+      type: object
+      properties:
+        request_id:
+          type: string
+        status:
+          type: string
+    UserRejection:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+    IpReputation:
+      type: object
+      properties:
+        ip:
+          type: string
+        vt_summary:
+          type: string
+        abuse_summary:
+          type: string
+        otx_summary:
+          type: string
+        computed_verdict:
+          type: object
+          properties:
+            severity:
+              type: string
+            action:
+              type: string
+        rationale:
+          type: string
+        recent_alerts:
+          type: array
+          items:
+            type: object
+        related_devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'

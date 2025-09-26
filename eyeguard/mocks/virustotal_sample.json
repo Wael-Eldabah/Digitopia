@@ -1,0 +1,13 @@
+﻿{
+  "provider": "virustotal",
+  "ip": "203.0.113.5",
+  "data": {
+    "attributes": {
+      "last_analysis_stats": {
+        "malicious": 3,
+        "suspicious": 0,
+        "harmless": 20
+      }
+    }
+  }
+}

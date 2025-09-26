@@ -1,0 +1,7 @@
+﻿# Software-only simulation / demo — no real systems will be contacted or modified.
+{"provider": "virustotal", "ip": "192.0.2.10", "data": {"attributes": {"last_analysis_stats": {"malicious": 1, "suspicious": 1, "harmless": 60}}}}
+{"provider": "virustotal", "ip": "198.51.100.25", "data": {"attributes": {"last_analysis_stats": {"malicious": 0, "suspicious": 1, "harmless": 30}}}}
+{"provider": "otx", "ip": "192.0.2.10", "pulse_info": {"count": 4, "pulses": ["pulse-a", "pulse-b"]}}
+{"provider": "otx", "ip": "198.51.100.25", "pulse_info": {"count": 1, "pulses": ["training"]}}
+{"provider": "abuseipdb", "ip": "192.0.2.10", "data": {"abuseConfidenceScore": 35, "totalReports": 12}}
+{"provider": "abuseipdb", "ip": "198.51.100.25", "data": {"abuseConfidenceScore": 5, "totalReports": 2}}

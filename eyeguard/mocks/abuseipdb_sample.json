@@ -1,0 +1,9 @@
+﻿{
+  "provider": "abuseipdb",
+  "ip": "203.0.113.5",
+  "data": {
+    "abuseConfidenceScore": 92,
+    "totalReports": 45,
+    "lastReportedAt": "2024-09-12T08:17:00Z"
+  }
+}

@@ -1,0 +1,7 @@
+{"mode": "simulation", "timestamp": "2025-09-25T16:44:01.972309Z", "level": "info", "message": "app.start"}
+INFO:     Started server process [7208]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
