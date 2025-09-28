@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from ..api_clients.abuse import AbuseIPDBClient
 from ..api_clients.base import ThreatClientError
@@ -129,13 +129,14 @@ async def add_simulation_device(payload: SimulationDeviceCreate) -> SimulationDe
         device = _create_device(device_id, normalized_ip, payload)
         state_store.devices[device_id] = device
         session_id = str(uuid.uuid4())
-        sim_device = SimulationDevice(session_id=session_id, device=device)
-        state_store.sessions[session_id] = sim_device
+        state_store.sessions[session_id] = SimulationDevice(session_id=session_id, device=device, status_message=None, blocked=False)
         state_store.session_context[session_id] = {
             "cwd": "/",
             "device_id": device_id,
             "traffic_gb": payload.traffic_gb,
             "auto_block": False,
+            "blocked": False,
+            "status_message": None,
             "files": DEFAULT_FILES.copy(),
         }
 
@@ -146,18 +147,27 @@ async def add_simulation_device(payload: SimulationDeviceCreate) -> SimulationDe
     severity, action, rationale = compute_verdict(vt_norm, otx_norm, abuse_norm)
 
     triggered_alerts: list[Alert] = []
+    status_message: str | None = None
+    blocked = False
     async with state_store._lock:  # type: ignore[attr-defined]
         session = state_store.sessions[session_id]
         device = session.device
         actor = f"simulation-session:{session_id}"
+        in_blocklist = state_store.is_ip_blocked(normalized_ip)
+        if in_blocklist:
+            blocked = True
+            status_message = "Session blocked: IP is on the blocklist."
+            block_alert = _build_alert(device, "Blocklist Enforcement", "High", "Device IP is currently blocklisted.", action="Auto-block")
+            _store_alert(block_alert, actor=actor)
+            triggered_alerts.append(block_alert)
         if severity == "High":
+            blocked = True
+            verdict_message = rationale or "Threat intelligence identified this IP as malicious."
+            if not status_message:
+                status_message = f"Threat intel verdict: {verdict_message}"
             alert = _build_alert(device, "Threat Intel Verdict", "High", rationale, action="Auto-block")
             _store_alert(alert, actor=actor)
             triggered_alerts.append(alert)
-            blocked_device = Device(**{**device.model_dump(), "status": "blocked"})
-            state_store.devices[device.id] = blocked_device
-            state_store.sessions[session_id] = SimulationDevice(session_id=session_id, device=blocked_device)
-            state_store.session_context[session_id]["auto_block"] = True
         elif severity == "Medium":
             alert = _build_alert(device, "Threat Intel Verdict", "Medium", rationale, action="Monitor")
             _store_alert(alert, actor=actor)
@@ -167,6 +177,21 @@ async def add_simulation_device(payload: SimulationDeviceCreate) -> SimulationDe
             overload_alert = _build_alert(device, "Traffic Spike", "High", "Device exceeded 10GB traffic threshold.")
             _store_alert(overload_alert, actor=actor)
             triggered_alerts.append(overload_alert)
+
+        if blocked:
+            blocked_device = Device(**{**device.model_dump(), "status": "blocked"})
+            state_store.devices[device.id] = blocked_device
+            device = blocked_device
+        state_store.session_context[session_id]["auto_block"] = blocked and not in_blocklist
+        state_store.session_context[session_id]["blocked"] = blocked
+        state_store.session_context[session_id]["status_message"] = status_message
+        state_store.session_context[session_id]["last_alert_ids"] = [alert.id for alert in triggered_alerts]
+        state_store.sessions[session_id] = SimulationDevice(
+            session_id=session_id,
+            device=device,
+            status_message=status_message,
+            blocked=blocked,
+        )
 
     return state_store.sessions[session_id]
 
@@ -195,6 +220,22 @@ async def nano_file_action(request: NanoFileAction) -> NanoFileResponse:
         state_store.log_activity(actor, "simulation.nano.save", {"file_path": file_path, "previous_hash": previous_hash})
         action_label = "edited" if request.action == "edit" else "saved"
         return NanoFileResponse(file_path=file_path, contents=files[file_path], message=f"File {action_label}")
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def end_simulation_session(session_id: str) -> Response:
+    async with state_store._lock:  # type: ignore[attr-defined]
+        session = state_store.sessions.pop(session_id, None)
+        context = state_store.session_context.pop(session_id, None)
+        if not session:
+            raise HTTPException(status_code=404, detail={"error_code": "SESSION_NOT_FOUND", "message": "Simulation session not found"})
+        device_id = None
+        if context:
+            device_id = context.get("device_id")
+        if device_id:
+            state_store.devices.pop(device_id, None)
+        state_store.log_activity(f"simulation-session:{session_id}", "simulation.session.ended", {"device_id": device_id})
+    return Response(status_code=204)
 
 
 @router.post("/terminal", response_model=TerminalCommandResponse)

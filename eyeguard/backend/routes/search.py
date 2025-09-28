@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
+from datetime import datetime
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -19,17 +21,18 @@ from ..cache import cache_provider
 from ..config import get_settings
 from ..database import get_db
 from ..logging_config import logger
-from ..models.schemas import Device, IpReputation, IpSearchResponse, SourceIntel
+from ..models.schemas import ComputedVerdict, Device, IndicatorSearchResponse, IpReputation, IpSearchResponse, SourceIntel
 from ..utils.ip_tools import normalize_ip
 from ..utils.rate_limiter import rate_limiter
 from ..utils.rules import compute_verdict
 from ..utils.state import state_store
+from ..services import ti_aggregator
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 ip_router = APIRouter(prefix="/api", tags=["search"])
 settings = get_settings()
 CACHE_WINDOW_SECONDS = 300
-_ip_lookup_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_ip_lookup_cache: Dict[tuple[str, int], tuple[float, Dict[str, Any]]] = {}
 
 
 async def _safe_fetch(client, ip: str) -> dict[str, Any]:
@@ -242,14 +245,17 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
     now = time.time()
-    cached = _ip_lookup_cache.get(normalized)
+    revision = state_store.integration_keys_revision()
+    cache_key = (normalized, revision)
+    cached = _ip_lookup_cache.get(cache_key)
     if cached and now - cached[0] < CACHE_WINDOW_SECONDS:
         logger.info("ip.lookup.cache_hit", ip=normalized)
         return IpSearchResponse(**cached[1])
 
-    vt_key = settings.vt_api_key
-    otx_key = settings.otx_api_key
-    abuse_key = settings.abuse_api_key
+    overrides = state_store.get_integration_keys()
+    vt_key = overrides.get("vt_api_key") or settings.vt_api_key
+    otx_key = overrides.get("otx_api_key") or settings.otx_api_key
+    abuse_key = overrides.get("abuse_api_key") or settings.abuse_api_key
     missing: list[str] = []
     if not vt_key:
         missing.append("virustotal")
@@ -266,6 +272,67 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
     vt_norm = transform_vt(vt_raw)
     otx_norm = transform_otx(otx_raw)
     abuse_norm = transform_abuse(abuse_raw)
+    severity, action, rationale = compute_verdict(vt_norm, otx_norm, abuse_norm)
+
+    malicious_sources: list[str] = []
+    if vt_norm.get("malicious_count", 0):
+        malicious_sources.append("virustotal")
+    if otx_norm.get("pulse_count", 0):
+        malicious_sources.append("otx")
+    if abuse_norm.get("abuse_score", 0) >= 50:
+        malicious_sources.append("abuseipdb")
+    if severity == "High" and "high-confidence" not in malicious_sources:
+        malicious_sources.append("high-confidence")
+
+    summary_text = _summarize_sources(vt_norm, otx_norm, abuse_norm)
+    alert_summaries: list[dict[str, Any]] = []
+    device_summaries: list[dict[str, Any]] = []
+    activity_timeline: list[dict[str, Any]] = []
+    blocked = False
+
+    async with state_store._lock:  # type: ignore[attr-defined]
+        blocked = state_store.is_ip_blocked(normalized)
+        matched_alerts = state_store.find_alerts_by_ip(normalized)
+        alert_summaries = [
+            {
+                "id": item.id,
+                "category": item.category,
+                "severity": item.severity,
+                "status": item.status,
+                "detected_at": item.detected_at,
+                "playbook": item.playbook,
+                "recommended_actions": item.recommended_actions,
+                "mitigation_steps": item.mitigation_steps,
+            }
+            for item in matched_alerts
+        ][:8]
+        device_summaries = [
+            device.model_dump()
+            for device in state_store.find_devices_by_ip(normalized)[:5]
+        ]
+        activity_timeline = [
+            {
+                "id": entry["id"],
+                "event": entry["event"],
+                "actor": entry["actor"],
+                "created_at": entry["created_at"],
+                "metadata": entry["metadata"],
+            }
+            for entry in state_store.recent_activity_for_indicator(normalized)
+        ][:10]
+        if severity == "High":
+            state_store.record_threat_alert(
+                {
+                    "id": str(uuid.uuid4()),
+                    "user_id": "global-alerts",
+                    "indicator": normalized,
+                    "created_at": datetime.utcnow(),
+                    "severity": severity,
+                    "sources": malicious_sources,
+                    "recommended_action": action,
+                    "rationale": rationale,
+                }
+            )
 
     payload = IpSearchResponse(
         ip=normalized,
@@ -274,13 +341,81 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
             "otx": _build_source("otx", otx_norm),
             "abuseipdb": _build_source("abuseipdb", abuse_norm),
         },
-        aggregated_summary=_summarize_sources(vt_norm, otx_norm, abuse_norm),
+        aggregated_summary=summary_text,
         missing_api_keys=missing,
+        computed_verdict=ComputedVerdict(severity=severity, action=action),
+        verdict_rationale=rationale,
+        blocked=blocked,
+        resolved_ips=[normalized],
+        recent_alerts=alert_summaries,
+        related_devices=device_summaries,
+        malicious_sources=malicious_sources,
+        intel_summary=rationale,
+        activity_log=activity_timeline,
     )
-    _ip_lookup_cache[normalized] = (now, payload.model_dump())
+    _ip_lookup_cache[cache_key] = (now, payload.model_dump())
     state_store.log_activity(
         actor="search-service",
         event="ip.lookup",
-        metadata={"ip": normalized, "missing_keys": missing},
+        metadata={
+            "ip": normalized,
+            "missing_keys": missing,
+            "severity": severity,
+        },
     )
+    if severity == "High":
+        recipients = state_store.collect_global_alert_recipients()
+        if recipients:
+            lines = [
+                f"Severity: {severity}",
+                f"Recommended action: {action}",
+                f"Indicator: {normalized}",
+                f"Sources: {', '.join(malicious_sources) if malicious_sources else 'none'}",
+                "",
+                "Intel summary:",
+                summary_text,
+            ]
+            if alert_summaries:
+                lines.append("")
+                lines.append("Related alerts:")
+                for entry in alert_summaries[:3]:
+                    timestamp = entry["detected_at"]
+                    if hasattr(timestamp, "isoformat"):
+                        timestamp = timestamp.isoformat()
+                    lines.append(f" - {timestamp} {entry['category']} ({entry['severity']})")
+            state_store.send_email(
+                subject=f"[EyeGuard] Malicious IP detected: {normalized}",
+                body="".join(lines),
+                recipients=recipients,
+                category="ti.lookup",
+                metadata={"ip": normalized, "severity": severity, "sources": malicious_sources},
+            )
     return payload
+
+
+@ip_router.get("/search/indicator", response_model=IndicatorSearchResponse)
+async def indicator_lookup(value: str, indicator_type: str = "url") -> IndicatorSearchResponse:
+    try:
+        result = await ti_aggregator.lookup_indicator(indicator_type, value, user_id="indicator-service")
+    except ti_aggregator.IndicatorValidationError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("indicator.lookup_failed", indicator=value, indicator_type=indicator_type, error=str(exc))
+        raise HTTPException(status_code=500, detail={"error": "Unable to complete indicator lookup."}) from exc
+
+    intel_summary = result.aggregated_summary.get("summary_text")
+    mal_sources = result.aggregated_summary.get("malicious_sources", [])
+    has_alerts = bool(result.aggregated_summary.get("is_malicious"))
+
+    return IndicatorSearchResponse(
+        type=result.indicator_type,
+        value=result.value,
+        resolved_ips=result.resolved_ips,
+        source_results=result.source_results,
+        aggregated_summary=result.aggregated_summary,
+        missing_api_keys=result.missing_api_keys,
+        cached=result.cached,
+        has_alerts=has_alerts,
+        malicious_sources=mal_sources,
+        intel_summary=intel_summary,
+    )

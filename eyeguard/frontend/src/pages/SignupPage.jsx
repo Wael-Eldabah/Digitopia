@@ -6,7 +6,7 @@ import axios from 'axios';
 const roles = [
   { label: 'SOC Analyst', value: 'SOC_ANALYST' },
   { label: 'Incident Response', value: 'INCIDENT_RESPONSE' },
-  { label: 'Manager', value: 'MANAGER' },
+  { label: 'Investigator', value: 'INVESTIGATOR' },
 ];
 
 export default function SignupPage() {
@@ -69,7 +69,7 @@ export default function SignupPage() {
                 value={form.displayName}
                 onChange={handleChange}
                 className="w-full bg-[#0d1524] border border-slate-800 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30 rounded-xl px-3 py-2 text-sm"
-                placeholder="Alex Drake"
+                placeholder="Wael Eldabah"
                 required
               />
             </div>
@@ -114,7 +114,7 @@ export default function SignupPage() {
               placeholder="At least 8 characters"
               required
             />
-            <p className="text-xs text-slate-500">Your password is stored securely and will be reset after approval.</p>
+            <p className="text-xs text-slate-500">Your password is stored securely.</p>
           </div>
           {error && (
             <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">{error}</p>

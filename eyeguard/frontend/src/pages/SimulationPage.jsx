@@ -1,12 +1,14 @@
-// Software-only simulation / demo — no real systems will be contacted or modified.
-import React, { useState } from 'react';
+ï»¿// Software-only simulation / demo - no real systems will be contacted or modified.
+import React, { useContext, useState } from 'react';
 import axios from 'axios';
 import SimulationTerminal from '../components/SimulationTerminal.jsx';
+import { SimulationContext } from '../context/SimulationContext.jsx';
 
 export default function SimulationPage() {
+  const { session, startSession, endSession, statusMessage } = useContext(SimulationContext);
   const [form, setForm] = useState({ ip_address: '', hostname: '', traffic_gb: 1, device_type: 'Endpoint' });
-  const [session, setSession] = useState(null);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -15,27 +17,57 @@ export default function SimulationPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setSubmitting(true);
+    setError('');
     try {
       const response = await axios.post('/api/v1/simulation/devices', {
         ...form,
         traffic_gb: Number(form.traffic_gb),
       });
-      setSession(response.data);
-      setError('');
+      startSession(response.data);
     } catch (err) {
-      const message = (err?.response?.data?.detail?.message
+      const message = err?.response?.data?.detail?.message
         || err?.response?.data?.message
-        || 'Failed to add device');
+        || 'Failed to add device';
       setError(message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  const handleEndSession = async () => {
+    setError('');
+    await endSession();
+  };
+
+  const blocked = Boolean(session?.blocked);
+
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-2xl font-semibold">Simulation Environment</h2>
-        <p className="text-sm text-slate-400">Provision virtual devices and trigger automated detections.</p>
+      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold">Simulation Environment</h2>
+          <p className="text-sm text-slate-400">Provision virtual devices and trigger automated detections.</p>
+        </div>
+        {session && (
+          <button
+            type="button"
+            onClick={handleEndSession}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-rose-400 hover:text-rose-200 transition"
+          >
+            End Session
+          </button>
+        )}
       </header>
+
+      {statusMessage && (
+        <div
+          className={`${blocked ? 'border-rose-500/50 bg-rose-500/10 text-rose-200' : 'border-sky-500/40 bg-sky-500/10 text-sky-100'} border rounded-xl px-4 py-3 text-sm`}
+        >
+          {statusMessage}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="md:col-span-2">
           <label className="block text-xs text-slate-500 mb-1" htmlFor="ip_address">IP Address</label>
@@ -85,12 +117,17 @@ export default function SimulationPage() {
           />
         </div>
         <div className="flex items-end">
-          <button type="submit" className="bg-indigo-500 hover:bg-indigo-600 text-white text-sm px-4 py-2 rounded">
-            Add Device
+          <button
+            type="submit"
+            className="bg-indigo-500 hover:bg-indigo-600 text-white text-sm px-4 py-2 rounded disabled:opacity-60"
+            disabled={submitting}
+          >
+            {submitting ? 'Creating...' : 'Add Device'}
           </button>
         </div>
         {error && <p className="md:col-span-5 text-xs text-rose-400">{error}</p>}
       </form>
+
       {session ? (
         <SimulationTerminal sessionId={session.session_id} />
       ) : (
@@ -101,7 +138,3 @@ export default function SimulationPage() {
     </div>
   );
 }
-
-
-
-

@@ -12,24 +12,27 @@ settings = get_settings()
 
 
 def send_alert_email(recipients: Iterable[str], subject: str, body: str) -> None:
-    to_addresses: List[str] = [addr for addr in (recipient.strip() for recipient in recipients) if addr]
-    if not to_addresses:
+    addresses: List[str] = [addr.strip() for addr in recipients if addr and addr.strip()]
+    if not addresses:
         return
     if not settings.smtp_server or not settings.alert_email_from:
-        logger.info("email.disabled", reason="SMTP not configured")
+        logger.info("smtp.disabled", reason="missing configuration")
         return
 
     message = MIMEText(body)
     message["Subject"] = subject
     message["From"] = settings.alert_email_from
-    message["To"] = ", ".join(to_addresses)
+    message["To"] = ", ".join(addresses)
 
     try:
-        with smtplib.SMTP(settings.smtp_server, settings.smtp_port) as client:
-            client.starttls()
+        with smtplib.SMTP(settings.smtp_server, settings.smtp_port, timeout=10) as client:
+            try:
+                client.starttls()
+            except Exception:  # pragma: no cover - optional capability
+                logger.debug("smtp.no_tls")
             if settings.smtp_user and settings.smtp_pass:
                 client.login(settings.smtp_user, settings.smtp_pass)
-            client.sendmail(settings.alert_email_from, to_addresses, message.as_string())
-        logger.info("email.sent", recipients=len(to_addresses))
-    except Exception as exc:  # pragma: no cover - network interaction
-        logger.warning("email.failed", error=str(exc))
+            client.sendmail(settings.alert_email_from, addresses, message.as_string())
+        logger.info("smtp.sent", count=len(addresses))
+    except Exception as exc:  # pragma: no cover - network operation
+        logger.warning("smtp.send_failed", error=str(exc))

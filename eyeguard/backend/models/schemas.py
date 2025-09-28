@@ -56,6 +56,10 @@ class Alert(BaseSchema):
     status: str
     rationale: Optional[str] = None
     action_taken: Optional[str] = None
+    playbook: Optional[str] = None
+    recommended_actions: List[str] = Field(default_factory=list)
+    mitigation_steps: List[str] = Field(default_factory=list)
+    intel_summary: Optional[str] = None
 
 
 class AlertCreate(BaseSchema):
@@ -64,6 +68,10 @@ class AlertCreate(BaseSchema):
     category: str
     severity: str
     rationale: Optional[str] = None
+    playbook: Optional[str] = None
+    recommended_actions: List[str] = Field(default_factory=list)
+    mitigation_steps: List[str] = Field(default_factory=list)
+    intel_summary: Optional[str] = None
 
 
 class AlertStatusUpdate(BaseSchema):
@@ -74,7 +82,19 @@ class AlertDetail(Alert):
     events: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-class Report(BaseSchema):\n    id: str\n    type: str\n    title: str\n    has_alerts: bool\n    created_at: datetime\n    summary: Dict[str, Any] = Field(default_factory=dict)\n    cached: Optional[bool] = None\n\n\nclass ReportDetail(Report):\n    payload: Dict[str, Any] = Field(default_factory=dict)\n
+class Report(BaseSchema):
+    id: str
+    type: str
+    title: str
+    has_alerts: bool
+    created_at: datetime
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    cached: Optional[bool] = None
+
+
+class ReportDetail(Report):
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
 
 class SimulationDeviceCreate(BaseSchema):
     ip_address: str
@@ -83,7 +103,12 @@ class SimulationDeviceCreate(BaseSchema):
     device_type: Optional[str] = None
 
 
-class SimulationDevice(BaseSchema):\n    session_id: str\n    device: Device\n    status_message: Optional[str] = None\n    blocked: bool = False\n
+class SimulationDevice(BaseSchema):
+    session_id: str
+    device: Device
+    status_message: Optional[str] = None
+    blocked: bool = False
+
 
 class TerminalCommandRequest(BaseSchema):
     session_id: str
@@ -122,12 +147,93 @@ class User(BaseSchema):
     status: str
     display_name: Optional[str] = None
     avatar_seed: Optional[str] = None
-    profile_image_url: Optional[str] = None\n    alert_email: Optional[EmailStr] = None\n    team_alert_emails: List[EmailStr] = Field(default_factory=list)\n    notifications: UserPreferences = Field(default_factory=UserPreferences)\n
+    profile_image_url: Optional[str] = None
+    alert_email: Optional[EmailStr] = None
+    team_alert_emails: List[EmailStr] = Field(default_factory=list)
+    notifications: UserPreferences = Field(default_factory=UserPreferences)
 
-class UserProfileUpdate(BaseSchema):\n    display_name: Optional[str] = None\n    email: Optional[EmailStr] = None\n    alert_email: Optional[EmailStr] = None\n    team_alert_emails: Optional[List[EmailStr]] = None\n
+
+class UserProfileUpdate(BaseSchema):
+    display_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    alert_email: Optional[EmailStr] = None
+    team_alert_emails: Optional[List[EmailStr]] = None
+
 
 class UserNotificationUpdate(BaseSchema):
     notifications: UserPreferences
+
+
+class PcapUploadResponse(BaseSchema):
+    ok: bool
+    report_ref: str
+    has_alerts: bool
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    ips: List[Dict[str, Any]] = Field(default_factory=list)
+    alerts_triggered: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class IndicatorSearchResponse(BaseSchema):
+    ok: bool = True
+    type: str
+    value: str
+    resolved_ips: List[str] = Field(default_factory=list)
+    source_results: Dict[str, Any] = Field(default_factory=dict)
+    aggregated_summary: Dict[str, Any] = Field(default_factory=dict)
+    missing_api_keys: List[str] = Field(default_factory=list)
+    cached: bool = False
+    has_alerts: bool = False
+    malicious_sources: List[str] = Field(default_factory=list)
+    intel_summary: Optional[str] = None
+    report_ref: Optional[str] = None
+
+
+class BlocklistRequest(BaseSchema):
+    ip: str
+
+
+class BlocklistResponse(BaseSchema):
+    ok: bool
+
+
+class BlocklistStatusResponse(BaseSchema):
+    blocked: bool
+
+
+class SimulationStatePayload(BaseSchema):
+    state: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UserSettings(BaseSchema):
+    name: Optional[str] = None
+    role: str
+    email: EmailStr
+    alert_email: Optional[EmailStr] = None
+    team_alert_emails: List[EmailStr] = Field(default_factory=list)
+
+
+class UserSettingsUpdate(BaseSchema):
+    alert_email: Optional[EmailStr] = None
+    team_alert_emails: Optional[List[EmailStr]] = None
+
+
+class IntegrationKeys(BaseSchema):
+    vt_api_key: Optional[str] = None
+    otx_api_key: Optional[str] = None
+    abuse_api_key: Optional[str] = None
+
+
+class PcapAnalysisSummary(BaseSchema):
+    id: str
+    created_at: datetime
+    has_alerts: bool
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    source_file: Optional[str] = None
+
+
+class PcapAnalysisDetail(PcapAnalysisSummary):
+    ips: List[Dict[str, Any]] = Field(default_factory=list)
+    alerts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class UserAvatarUpdate(BaseSchema):
@@ -152,6 +258,21 @@ class UserPasswordResetResponse(BaseSchema):
     new_password: str
 
 
+
+
+class PasswordResetResponse(BaseSchema):
+    message: str
+    reset_token: str
+class PasswordResetConfirmRequest(BaseSchema):
+    email: EmailStr
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+
+class PasswordResetConfirmResponse(BaseSchema):
+    message: str
+
+
 class LoginResponse(BaseSchema):
     token: str
     user: User
@@ -172,11 +293,6 @@ class UserRejection(BaseSchema):
     id: str
     status: str
     message: str
-
-
-class PasswordResetResponse(BaseSchema):
-    message: str
-    reset_token: str
 
 
 class ComputedVerdict(BaseSchema):
@@ -205,6 +321,15 @@ class IpSearchResponse(BaseSchema):
     source_results: Dict[str, SourceIntel]
     aggregated_summary: str
     missing_api_keys: List[str] = Field(default_factory=list)
+    computed_verdict: Optional[ComputedVerdict] = None
+    verdict_rationale: Optional[str] = None
+    blocked: bool = False
+    resolved_ips: List[str] = Field(default_factory=list)
+    recent_alerts: List[Dict[str, Any]] = Field(default_factory=list)
+    related_devices: List[Dict[str, Any]] = Field(default_factory=list)
+    malicious_sources: List[str] = Field(default_factory=list)
+    intel_summary: Optional[str] = None
+    activity_log: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ActivityLog(BaseSchema):
@@ -221,21 +346,32 @@ __all__ = [
     "AlertCreate",
     "AlertDetail",
     "AlertStatusUpdate",
+    "BlocklistRequest",
+    "BlocklistResponse",
+    "BlocklistStatusResponse",
     "ComputedVerdict",
     "Device",
     "DeviceCreate",
     "DeviceUpdate",
+    "IndicatorSearchResponse",
+    "IntegrationKeys",
     "IpReputation",
     "IpSearchResponse",
     "LoginResponse",
     "NanoFileAction",
     "NanoFileResponse",
+    "PasswordResetConfirmRequest",
+    "PasswordResetConfirmResponse",
     "PasswordResetResponse",
+    "PcapAnalysisDetail",
+    "PcapAnalysisSummary",
+    "PcapUploadResponse",
     "ProfileUploadResponse",
     "Report",
     "ReportDetail",
     "SimulationDevice",
     "SimulationDeviceCreate",
+    "SimulationStatePayload",
     "SourceIntel",
     "SystemHealth",
     "TerminalCommandRequest",
@@ -248,8 +384,9 @@ __all__ = [
     "UserPreferences",
     "UserProfileUpdate",
     "UserRejection",
+    "UserSettings",
+    "UserSettingsUpdate",
     "UserSignupQueued",
     "UserSignupRequest",
     "UserStatusUpdate",
 ]
-

@@ -8,6 +8,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..models.schemas import Alert, AlertCreate, AlertDetail, AlertStatusUpdate, User
+from ..services.alerting import apply_alert_guidance
 from ..utils.auth import get_current_user
 from ..utils.state import state_store
 
@@ -30,20 +31,23 @@ async def list_alerts(
         if status:
             alerts = [alert for alert in alerts if alert.status == status]
         alerts.sort(key=lambda item: item.detected_at, reverse=True)
-        return [_clone_alert(alert) for alert in alerts]
+        enriched = [apply_alert_guidance(alert) for alert in alerts]
+        return [_clone_alert(alert) for alert in enriched]
 
 
 @router.post("/alerts", response_model=Alert, status_code=201)
 async def create_alert(payload: AlertCreate, current_user: User = Depends(get_current_user)) -> Alert:
     async with state_store._lock:  # type: ignore[attr-defined]
         alert_id = str(uuid.uuid4())
+        base_payload = {**payload.model_dump()}
         alert = Alert(
             id=alert_id,
             detected_at=datetime.utcnow(),
             status="Open",
             action_taken=None,
-            **payload.model_dump(),
+            **base_payload,
         )
+        alert = apply_alert_guidance(alert)
         state_store.register_alert(alert, actor=current_user.display_name or current_user.email, event="Alert created")
     return _clone_alert(alert)
 
@@ -54,8 +58,9 @@ async def get_alert(alert_id: str) -> AlertDetail:
         alert = state_store.alerts.get(alert_id)
         if not alert:
             raise HTTPException(status_code=404, detail={"error_code": "ALERT_NOT_FOUND", "message": "Alert not found"})
+        enriched = apply_alert_guidance(alert)
         events = state_store.get_alert_history(alert_id)
-        return AlertDetail(**alert.model_dump(), events=events)
+        return AlertDetail(**enriched.model_dump(), events=events)
 
 
 @router.post("/alerts/{alert_id}/status", response_model=Alert)
@@ -73,6 +78,7 @@ async def update_alert_status(
         if not alert:
             raise HTTPException(status_code=404, detail={"error_code": "ALERT_NOT_FOUND", "message": "Alert not found"})
         updated = Alert(**{**alert.model_dump(), "status": payload.status})
+        updated = apply_alert_guidance(updated)
         state_store.alerts[alert_id] = updated
         actor = current_user.display_name or current_user.email
         state_store.append_alert_event(

@@ -7,11 +7,11 @@ from typing import Dict, List
 
 from ..logging_config import logger
 
-try:
+try:  # pragma: no cover - optional dependency
     from scapy.all import IP, rdpcap  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    rdpcap = None  # type: ignore
+except Exception:  # pragma: no cover - optional dependency missing
     IP = None  # type: ignore
+    rdpcap = None  # type: ignore
 
 
 @dataclass
@@ -23,16 +23,16 @@ class PcapSummary:
 
 
 class PcapParsingError(RuntimeError):
-    pass
+    """Raised when PCAP parsing fails."""
 
 
 def parse_pcap(file_path: str) -> PcapSummary:
     if rdpcap is None or IP is None:
-        raise PcapParsingError("Scapy is not available in this environment")
+        raise PcapParsingError("PCAP parsing is unavailable (Scapy not installed).")
     try:
         packets = rdpcap(file_path)
-    except Exception as exc:  # pragma: no cover - scapy parsing path
-        logger.warning("pcap.parse_failed", error=str(exc))
+    except Exception as exc:  # pragma: no cover - scapy error
+        logger.warning("pcap.parse_error", error=str(exc))
         raise PcapParsingError("Unable to parse PCAP file") from exc
 
     total_packets = len(packets)
@@ -52,7 +52,7 @@ def parse_pcap(file_path: str) -> PcapSummary:
             protocol_counter.update([packet.__class__.__name__])
 
     unique_ips = list(ip_counter.keys())
-    top_ips = [{"ip": ip, "packet_count": count} for ip, count in ip_counter.most_common(5)]
+    top_ips = [{"ip": ip, "packet_count": count} for ip, count in ip_counter.most_common(10)]
     protocol_counts = dict(protocol_counter)
 
     return PcapSummary(
@@ -64,5 +64,9 @@ def parse_pcap(file_path: str) -> PcapSummary:
 
 
 def _protocol_name(proto: int) -> str:
-    mapping = {1: "ICMP", 6: "TCP", 17: "UDP"}
+    mapping = {
+        1: "ICMP",
+        6: "TCP",
+        17: "UDP",
+    }
     return mapping.get(proto, f"PROTO_{proto}")

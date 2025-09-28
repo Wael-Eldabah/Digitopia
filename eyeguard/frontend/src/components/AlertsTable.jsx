@@ -27,12 +27,25 @@ function AlertModal({ alert, onClose, onUpdate }) {
     return null;
   }
 
+  const guidanceActions = Array.isArray(alert.recommended_actions) ? alert.recommended_actions : [];
+  const mitigationSteps = Array.isArray(alert.mitigation_steps) ? alert.mitigation_steps : [];
+  const hasActions = guidanceActions.length > 0;
+  const hasMitigations = mitigationSteps.length > 0;
+  const intelSummary = alert.intel_summary || alert.rationale;
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur flex items-center justify-center p-4">
       <div className="w-full max-w-xl bg-[#10192c] border border-slate-800/70 rounded-3xl shadow-2xl shadow-slate-900/40 p-8 space-y-6">
         <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-xl font-semibold text-slate-100">{alert.category}</h3>
+          <div className="space-y-1">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+              <h3 className="text-xl font-semibold text-slate-100">{alert.category}</h3>
+              {alert.playbook && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-sky-200">
+                  Playbook: {alert.playbook}
+                </span>
+              )}
+            </div>
             <p className="text-xs uppercase text-slate-500 tracking-wide">Alert Detail</p>
           </div>
           <button type="button" onClick={() => onClose()} className="text-slate-500 hover:text-slate-300 transition" aria-label="Close alert detail">
@@ -59,11 +72,49 @@ function AlertModal({ alert, onClose, onUpdate }) {
             <p className="font-medium text-slate-200">{new Date(alert.detected_at).toLocaleString()}</p>
           </div>
         </div>
-        <div>
-          <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Rationale</p>
-          <p className="text-sm text-slate-200 leading-relaxed bg-slate-900/60 border border-slate-800/60 rounded-2xl p-4">
-            {alert.rationale || 'No rationale recorded yet.'}
-          </p>
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Rationale</p>
+            <p className="text-sm text-slate-200 leading-relaxed bg-slate-900/60 border border-slate-800/60 rounded-2xl p-4">
+              {alert.rationale || 'No rationale recorded yet.'}
+            </p>
+          </div>
+          {intelSummary && intelSummary !== alert.rationale && (
+            <div className="bg-slate-900/70 border border-sky-500/20 rounded-2xl p-4">
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Intel Summary</p>
+              <p className="text-sm text-slate-200 leading-relaxed">{intelSummary}</p>
+            </div>
+          )}
+          {(hasActions || hasMitigations) && (
+            <div className="grid gap-4 md:grid-cols-2">
+              {hasActions && (
+                <div className="space-y-2">
+                  <h4 className="text-xs uppercase tracking-wider text-emerald-300">Recommended Actions</h4>
+                  <ul className="space-y-1 text-sm text-slate-200">
+                    {guidanceActions.map((item) => (
+                      <li key={item} className="flex items-start gap-2">
+                        <span className="mt-1 flex h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasMitigations && (
+                <div className="space-y-2">
+                  <h4 className="text-xs uppercase tracking-wider text-rose-200">Mitigation Steps</h4>
+                  <ul className="space-y-1 text-sm text-slate-200">
+                    {mitigationSteps.map((item) => (
+                      <li key={item} className="flex items-start gap-2">
+                        <span className="mt-1 flex h-2 w-2 rounded-full bg-rose-400" aria-hidden="true" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-3">
           <button

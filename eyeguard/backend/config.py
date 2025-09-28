@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     request_max_retries: int = 2
     rate_limit_per_minute: int = 30
     uploads_path: str = Field(default="backend/uploads/pcaps", env="UPLOADS_PATH")
-    pcap_max_size_mb: int = Field(default=50, env="PCAP_MAX_SIZE_MB")
+    pcap_max_size_mb: int = Field(default=512, env="PCAP_MAX_SIZE_MB")
+    pcap_enrichment_ip_limit: int = Field(default=25, env="PCAP_ENRICHMENT_IP_LIMIT")
     ti_cache_ttl_seconds: int = Field(default=300, env="TI_CACHE_TTL_SECONDS")
     enable_dns_resolve: bool = Field(default=False, env="ENABLE_DNS_RESOLVE")
     debug_ti: bool = Field(default=False, env="DEBUG_TI")

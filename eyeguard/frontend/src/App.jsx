@@ -9,9 +9,12 @@ import ReportsPage from './pages/ReportsPage.jsx';
 import SimulationPage from './pages/SimulationPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import IPSearchPage from './pages/IPSearchPage.jsx';
+import PcapAnalysisPage from './pages/PcapAnalysisPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
+import { SimulationProvider } from './context/SimulationContext.jsx';
+import { hydrateUserProfile } from './utils/assets.js';
 
 export const AuthContext = createContext({
   isAuthenticated: false,
@@ -62,7 +65,7 @@ export default function App() {
       if (parsed?.token) {
         axios.defaults.headers.common['X-Eyeguard-Token'] = parsed.token;
       }
-      return { token: parsed.token, user: parsed.user, managerPending: parsed.managerPending || 0 };
+      return { token: parsed.token, user: hydrateUserProfile(parsed.user), managerPending: parsed.managerPending || 0 };
     } catch (error) {
       console.warn('Failed to restore session', error);
       return { token: null, user: null, managerPending: 0 };
@@ -86,8 +89,9 @@ export default function App() {
     }
     try {
       const { data } = await axios.get('/api/v1/auth/me');
-      setSession((prev) => ({ ...prev, user: data }));
-      if (data?.role === 'MANAGER') {
+      const hydratedUser = hydrateUserProfile(data);
+      setSession((prev) => ({ ...prev, user: hydratedUser }));
+      if (hydratedUser?.role === 'MANAGER') {
         try {
           const count = await axios.get('/api/v1/settings/users/pending/count');
           setSession((prev) => ({ ...prev, managerPending: count.data?.pending ?? 0 }));
@@ -111,7 +115,7 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const { data } = await axios.post('/api/v1/auth/login', credentials);
-      setSession({ token: data.token, user: data.user, managerPending: data.manager_pending_requests ?? 0 });
+      setSession({ token: data.token, user: hydrateUserProfile(data.user), managerPending: data.manager_pending_requests ?? 0 });
       return data;
     } finally {
       setIsSubmitting(false);
@@ -128,7 +132,7 @@ export default function App() {
       if (!prev) {
         return prev;
       }
-      return { ...prev, user: nextUser };
+      return { ...prev, user: hydrateUserProfile(nextUser) };
     });
   };
 
@@ -154,27 +158,30 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={authValue}>
-      <Routes>
-        <Route path="/login" element={<LoginPage isSubmitting={isSubmitting} onLogin={login} />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/forgot" element={<ForgotPasswordPage />} />
-        <Route
-          path="/"
-          element={(
-            <ProtectedRoute>
-              <ProtectedLayout />
-            </ProtectedRoute>
-          )}
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="alerts" element={<AlertsPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="simulation" element={<SimulationPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="search" element={<IPSearchPage />} />
-        </Route>
-        <Route path="*" element={<Navigate to={session?.token ? '/' : '/login'} replace />} />
-      </Routes>
+      <SimulationProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage isSubmitting={isSubmitting} onLogin={login} />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/forgot" element={<ForgotPasswordPage />} />
+          <Route
+            path="/"
+            element={(
+              <ProtectedRoute>
+                <ProtectedLayout />
+              </ProtectedRoute>
+            )}
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="alerts" element={<AlertsPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="simulation" element={<SimulationPage />} />
+            <Route path="pcap" element={<PcapAnalysisPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="search" element={<IPSearchPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to={session?.token ? '/' : '/login'} replace />} />
+        </Routes>
+      </SimulationProvider>
     </AuthContext.Provider>
   );
 }

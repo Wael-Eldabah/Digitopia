@@ -16,6 +16,7 @@ from ..cache import cache_provider
 from ..config import get_settings
 from ..logging_config import logger
 from ..utils.rate_limiter import rate_limiter
+from ..utils.state import state_store
 
 try:  # optional dependency
     import dns.resolver  # type: ignore
@@ -170,7 +171,8 @@ async def lookup_indicator(
         raise IndicatorValidationError("Unsupported indicator type")
 
     normalised = normalise_indicator(indicator_type, value)
-    cache_key = f"ti:{indicator_type}:{normalised}"
+    revision = state_store.integration_keys_revision()
+    cache_key = f"ti:{revision}:{indicator_type}:{normalised}"
     cached = await cache_provider.get(cache_key)
     if cached:
         payload = json.loads(cached.value if hasattr(cached, "value") else cached)
@@ -189,9 +191,10 @@ async def lookup_indicator(
         raise IndicatorValidationError("Rate limit exceeded")
 
     resolved_ips = await _resolve_dns_records(indicator_type, normalised)
-    vt_key = settings.vt_api_key
-    otx_key = settings.otx_api_key
-    abuse_key = settings.abuse_api_key
+    overrides = state_store.get_integration_keys()
+    vt_key = overrides.get("vt_api_key") or settings.vt_api_key
+    otx_key = overrides.get("otx_api_key") or settings.otx_api_key
+    abuse_key = overrides.get("abuse_api_key") or settings.abuse_api_key
 
     missing_keys: List[str] = []
     vt_raw: Dict[str, Any]

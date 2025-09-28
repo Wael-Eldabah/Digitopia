@@ -59,7 +59,11 @@ async def get_report(report_id: str) -> ReportDetail:
         report = state_store.reports.get(report_id)
         if not report:
             raise HTTPException(status_code=404, detail={"error_code": "REPORT_NOT_FOUND", "message": "Report not found"})
-        return ReportDetail(**report.model_dump())
+        payload = report.model_dump()
+        analysis = state_store.get_pcap_analysis(report_id)
+        if analysis:
+            payload["payload"] = analysis
+        return ReportDetail(**payload)
 
 
 @router.get("/reports/{report_id}/export.csv")

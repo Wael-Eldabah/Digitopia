@@ -2,6 +2,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { AuthContext } from '../App.jsx';
+import { resolveAssetUrl } from '../utils/assets.js';
 
 const navItems = [
   { label: 'Dashboard', path: '/', icon: (
@@ -31,7 +32,14 @@ const navItems = [
       <path d="M14 15h7v7h-7z" />
     </svg>
   ) },
-  { label: 'IP Search', path: '/search', icon: (
+  { label: 'PCAP Analyzer', path: '/pcap', icon: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M4 16v-4a8 8 0 1 1 16 0v4" />
+      <path d="M7 20h10" />
+      <path d="M12 12v8" />
+    </svg>
+  ) },
+  { label: 'IP & URL Search', path: '/search', icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-3.5-3.5" />
@@ -68,6 +76,7 @@ export default function Sidebar() {
   const displayName = user?.display_name || user?.email || 'Analyst';
   const initials = initialsFromName(displayName, 'EG');
   const roleLabel = user?.role ? user.role.replace('_', ' ') : 'Guest';
+  const avatarUrl = resolveAssetUrl(user?.profile_image_url);
   const avatarStyle = { backgroundImage: colorFromSeed(user?.avatar_seed || 'eyeguard') };
 
   return (
@@ -119,9 +128,9 @@ export default function Sidebar() {
       </nav>
       <div className="px-6 pb-8 pt-6 border-t border-slate-800/60">
         <div className="flex items-center gap-3">
-          {user?.profile_image_url ? (
+          {avatarUrl ? (
             <img
-              src={user.profile_image_url}
+              src={avatarUrl}
               alt={displayName}
               className="w-11 h-11 rounded-full object-cover border border-slate-700"
             />

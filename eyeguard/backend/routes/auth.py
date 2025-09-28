@@ -7,7 +7,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 
-from ..models.schemas import LoginResponse, PasswordResetResponse, User, UserSignupQueued
+from ..models.schemas import (
+    LoginResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetConfirmResponse,
+    PasswordResetResponse,
+    User,
+    UserSignupQueued,
+)
 from ..utils.auth import get_current_user
 from ..utils.state import state_store
 
@@ -71,8 +78,42 @@ async def forgot_password(payload: ForgotPasswordRequest) -> PasswordResetRespon
         user_id = state_store.find_user_id_by_email(payload.email)
         if not user_id:
             raise HTTPException(status_code=404, detail={"error_code": "NOT_FOUND", "message": "Email not registered"})
+        user = state_store.users[user_id]
         reset_token = state_store.issue_password_reset_token(user_id)
-    return PasswordResetResponse(message="Reset instructions sent (simulated)", reset_token=reset_token)
+    recipients = state_store.collect_user_alert_targets(user)
+    if not recipients:
+        recipients = [user.email]
+    body_lines = [
+        f"Hello {user.display_name or user.email},",
+        "",
+        f"Use the following token to reset your EyeGuard password: {reset_token}.",
+        "This token expires when a new one is generated.",
+        "",
+        "If you did not request a reset, you can safely ignore this message.",
+    ]
+    body = "\n".join(body_lines)
+    state_store.send_email(
+        subject="[EyeGuard] Password Reset Token",
+        body=body,
+        recipients=recipients,
+        category="auth.password.reset",
+        metadata={"user_id": user.id, "email": user.email},
+    )
+    state_store.log_activity(user.id, "auth.reset.requested", {"recipients": recipients})
+    return PasswordResetResponse(message="Reset instructions sent (simulated)", reset_token=reset_token, sent_to=recipients[0])
+
+
+
+@router.post("/reset", response_model=PasswordResetConfirmResponse)
+async def confirm_password_reset(payload: PasswordResetConfirmRequest) -> PasswordResetConfirmResponse:
+    async with state_store._lock:  # type: ignore[attr-defined]
+        user_id = state_store.validate_reset_token(payload.email, payload.token)
+        if not user_id:
+            raise HTTPException(status_code=400, detail={"error_code": "INVALID_TOKEN", "message": "Invalid or expired reset token"})
+        state_store.reset_user_password(user_id, payload.new_password)
+        user = state_store.users[user_id]
+    state_store.log_activity(user.id, "auth.reset.completed", {"email": user.email})
+    return PasswordResetConfirmResponse(message="Password updated. You can now log in.")
 
 
 @router.get("/me", response_model=User)

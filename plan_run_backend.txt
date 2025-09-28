@@ -1,0 +1,8 @@
+1. Verify backend dependencies (uvicorn, FastAPI, project requirements) installed in active environment.
+2. Activate virtualenv (if needed) and ensure PYTHONPATH includes project root.
+3. Navigate to repo root and start backend via uvicorn using module path `eyeguard.backend.app:app` with reload + reload-dir.
+4. Tail logs/console for errors; if any arise, capture traceback.
+5. If errors occur, diagnose missing modules/import issues, fix code/config, rerun.
+6. Confirm server accessible at http://127.0.0.1:8000 and APIs respond.
+7. Document command used and any additional setup steps.
+

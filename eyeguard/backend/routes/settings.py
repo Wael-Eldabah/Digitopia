@@ -19,6 +19,9 @@ from ..models.schemas import (
     UserPreferences,
     UserProfileUpdate,
     UserRejection,
+    UserSettings,
+    UserSettingsUpdate,
+    IntegrationKeys,
     UserSignupQueued,
     UserSignupRequest,
     UserStatusUpdate,
@@ -39,6 +42,60 @@ def _user_out(user: User) -> User:
 @router.get("/profile", response_model=User)
 async def get_profile(current_user: User = Depends(get_current_user)) -> User:
     return _user_out(current_user)
+
+
+@router.get("/profile/settings", response_model=UserSettings)
+async def get_user_settings(current_user: User = Depends(get_current_user)) -> UserSettings:
+    return UserSettings(
+        name=current_user.display_name,
+        role=current_user.role,
+        email=current_user.email,
+        alert_email=current_user.alert_email,
+        team_alert_emails=current_user.team_alert_emails,
+    )
+
+
+@router.patch("/profile/settings", response_model=UserSettings)
+async def update_user_settings(
+    payload: UserSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+) -> UserSettings:
+    updates = payload.model_dump(exclude_none=True)
+    if "team_alert_emails" in updates and current_user.role != "MANAGER":
+        updates.pop("team_alert_emails", None)
+    if not updates:
+        raise HTTPException(status_code=400, detail={"error_code": "INVALID_INPUT", "message": "No fields provided"})
+    async with state_store._lock:  # type: ignore[attr-defined]
+        updated = state_store.update_user(current_user.id, **updates)
+    return UserSettings(
+        name=updated.display_name,
+        role=updated.role,
+        email=updated.email,
+        alert_email=updated.alert_email,
+        team_alert_emails=updated.team_alert_emails,
+    )
+
+
+@router.get("/profile/integrations", response_model=IntegrationKeys)
+async def get_integration_keys(_: User = Depends(require_manager)) -> IntegrationKeys:
+    async with state_store._lock:  # type: ignore[attr-defined]
+        data = state_store.get_integration_keys()
+    return IntegrationKeys(**data)
+
+
+@router.patch("/profile/integrations", response_model=IntegrationKeys)
+async def update_integration_keys(
+    payload: IntegrationKeys,
+    _: User = Depends(require_manager),
+) -> IntegrationKeys:
+    async with state_store._lock:  # type: ignore[attr-defined]
+        state_store.set_integration_keys(
+            vt_api_key=payload.vt_api_key,
+            otx_api_key=payload.otx_api_key,
+            abuse_api_key=payload.abuse_api_key,
+        )
+        data = state_store.get_integration_keys()
+    return IntegrationKeys(**data)
 
 
 @router.get("/users", response_model=List[User])
@@ -91,6 +148,8 @@ async def update_profile(
 ) -> User:
     updates = payload.model_dump(exclude_none=True)
     updates.pop("role", None)
+    if "team_alert_emails" in updates and current_user.role != "MANAGER":
+        updates.pop("team_alert_emails", None)
     if not updates:
         raise HTTPException(status_code=400, detail={"error_code": "INVALID_INPUT", "message": "No fields provided"})
     async with state_store._lock:  # type: ignore[attr-defined]

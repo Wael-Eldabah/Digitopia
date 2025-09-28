@@ -1,26 +1,52 @@
-﻿// Software-only simulation / demo — no real systems will be contacted or modified.
-import React, { useState } from 'react';
+﻿// Software-only simulation / demo - no real systems will be contacted or modified.
+import React, { useContext, useState } from 'react';
 import axios from 'axios';
+import { SimulationContext } from '../context/SimulationContext.jsx';
 
 export default function SimulationTerminal({ sessionId }) {
+  const {
+    session,
+    history,
+    alerts,
+    appendHistory,
+    setAlerts,
+  } = useContext(SimulationContext);
   const [command, setCommand] = useState('');
-  const [history, setHistory] = useState([]);
-  const [alerts, setAlerts] = useState([]);
+  const [pending, setPending] = useState(false);
+  const blocked = session?.blocked;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!command.trim()) {
       return;
     }
-    const response = await axios.post('/api/v1/simulation/terminal', {
-      session_id: sessionId,
-      command,
-    });
-    setHistory((prev) => [...prev, `$ ${command}`, response.data.output]);
-    if (response.data.alerts_triggered?.length) {
-      setAlerts(response.data.alerts_triggered);
+    if (blocked) {
+      appendHistory(`$ ${command}`);
+      appendHistory('Session is blocked. End the simulation to start a new session.');
+      setCommand('');
+      return;
     }
-    setCommand('');
+    setPending(true);
+    try {
+      const response = await axios.post('/api/v1/simulation/terminal', {
+        session_id: sessionId,
+        command,
+      });
+      appendHistory([`$ ${command}`, response.data.output]);
+      if (Array.isArray(response.data.alerts_triggered) && response.data.alerts_triggered.length > 0) {
+        setAlerts(response.data.alerts_triggered);
+      } else {
+        setAlerts([]);
+      }
+    } catch (err) {
+      const message = err?.response?.data?.detail?.message
+        || err?.response?.data?.error
+        || 'Command execution failed.';
+      appendHistory([`$ ${command}`, message]);
+    } finally {
+      setCommand('');
+      setPending(false);
+    }
   };
 
   return (
@@ -28,6 +54,9 @@ export default function SimulationTerminal({ sessionId }) {
       <div className="p-4 border-b border-slate-800">
         <h3 className="text-lg font-semibold">Simulation Terminal</h3>
         <p className="text-xs text-slate-500">Whitelisted commands: ls, cd, nano, edit, mv, rm, ip.</p>
+        {blocked && (
+          <p className="mt-2 text-xs text-rose-300">Session is blocked. End the current session to start a new simulation.</p>
+        )}
       </div>
       <div className="p-4 space-y-3">
         <div className="bg-slate-950 border border-slate-800 rounded-md p-3 h-48 overflow-y-auto text-sm font-mono">
@@ -45,9 +74,14 @@ export default function SimulationTerminal({ sessionId }) {
             value={command}
             onChange={(event) => setCommand(event.target.value)}
             placeholder="Enter command"
+            disabled={pending || blocked}
           />
-          <button type="submit" className="bg-indigo-500 hover:bg-indigo-600 text-sm px-4 py-2 rounded text-white">
-            Run
+          <button
+            type="submit"
+            className="bg-indigo-500 hover:bg-indigo-600 text-sm px-4 py-2 rounded text-white disabled:opacity-60"
+            disabled={pending || blocked}
+          >
+            {pending ? 'Running...' : 'Run'}
           </button>
         </form>
         {alerts.length > 0 && (
@@ -56,7 +90,7 @@ export default function SimulationTerminal({ sessionId }) {
             <ul className="list-disc list-inside text-amber-100 space-y-1">
               {alerts.map((alert) => (
                 <li key={alert.id}>
-                  <span className="font-semibold">{alert.category}</span> — {alert.rationale}
+                  <span className="font-semibold">{alert.category}</span> - {alert.rationale}
                 </li>
               ))}
             </ul>
