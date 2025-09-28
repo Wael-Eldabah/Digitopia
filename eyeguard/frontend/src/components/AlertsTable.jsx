@@ -1,14 +1,9 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { AuthContext } from '../App.jsx';
 import CreateIncidentModal from './CreateIncidentModal.jsx';
-
-const fetchAlerts = async () => {
-  const response = await axios.get('/api/v1/alerts');
-  return response.data;
-};
 
 const severityStyles = {
   High: 'bg-rose-500/15 text-rose-300 border border-rose-400/30',
@@ -22,91 +17,113 @@ const statusPalette = {
   Acknowledged: 'text-sky-300',
 };
 
-function AlertModal({ alert, onClose, onUpdate }) {
+const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : 'N/A');
+
+const AlertModal = ({ alert, onClose, onRefresh }) => {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+
   if (!alert) {
     return null;
   }
 
-  const guidanceActions = Array.isArray(alert.recommended_actions) ? alert.recommended_actions : [];
-  const mitigationSteps = Array.isArray(alert.mitigation_steps) ? alert.mitigation_steps : [];
-  const hasActions = guidanceActions.length > 0;
-  const hasMitigations = mitigationSteps.length > 0;
+  const acknowledge = async () => {
+    try {
+      setPending(true);
+      setError('');
+      await axios.post(`/api/v1/alerts/${alert.id}/status`, { status: 'Acknowledged' });
+      onRefresh?.();
+      onClose();
+    } catch (ackErr) {
+      setError(
+        ackErr?.response?.data?.detail?.message || ackErr?.message || 'Unable to update alert status.',
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const guidance = Array.isArray(alert.recommended_actions) ? alert.recommended_actions : [];
+  const mitigation = Array.isArray(alert.mitigation_steps) ? alert.mitigation_steps : [];
   const intelSummary = alert.intel_summary || alert.rationale;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur flex items-center justify-center p-4">
-      <div className="w-full max-w-xl bg-[#10192c] border border-slate-800/70 rounded-3xl shadow-2xl shadow-slate-900/40 p-8 space-y-6">
-        <div className="flex items-start justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-[min(480px,90vw)] max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-800/70 bg-[#10192c] p-6 shadow-2xl shadow-slate-900/50 sm:p-8">
+        <header className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-              <h3 className="text-xl font-semibold text-slate-100">{alert.category}</h3>
-              {alert.playbook && (
-                <span className="inline-flex items-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-sky-200">
-                  Playbook: {alert.playbook}
-                </span>
-              )}
-            </div>
-            <p className="text-xs uppercase text-slate-500 tracking-wide">Alert Detail</p>
+            <h3 className="text-lg font-semibold text-slate-100">{alert.category}</h3>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Alert detail</p>
           </div>
-          <button type="button" onClick={() => onClose()} className="text-slate-500 hover:text-slate-300 transition" aria-label="Close alert detail">
-            <span aria-hidden="true">X</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-500 transition hover:text-slate-300"
+            aria-label="Close alert detail"
+          >
+            �
           </button>
-        </div>
-        <div className="grid grid-cols-2 gap-5 text-sm">
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">Source IP</p>
-            <p className="font-medium text-slate-200">{alert.source_ip}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">Destination IP</p>
-            <p className="font-medium text-slate-200">{alert.destination_ip || 'N/A'}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">Severity</p>
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${severityStyles[alert.severity] || severityStyles.Low}`}>
-              {alert.severity}
-            </span>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">Detected</p>
-            <p className="font-medium text-slate-200">{new Date(alert.detected_at).toLocaleString()}</p>
-          </div>
-        </div>
-        <div className="space-y-3">
+        </header>
+
+        <dl className="mt-6 grid grid-cols-1 gap-4 text-sm text-slate-200 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Rationale</p>
-            <p className="text-sm text-slate-200 leading-relaxed bg-slate-900/60 border border-slate-800/60 rounded-2xl p-4">
-              {alert.rationale || 'No rationale recorded yet.'}
-            </p>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Source IP</dt>
+            <dd className="font-mono">{alert.source_ip}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Destination IP</dt>
+            <dd className="font-mono">{alert.destination_ip || 'N/A'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Severity</dt>
+            <dd>
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                severityStyles[alert.severity] || severityStyles.Low
+              }`}
+              >
+                {alert.severity}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">Detected</dt>
+            <dd>{formatDateTime(alert.detected_at)}</dd>
+          </div>
+        </dl>
+
+        <section className="mt-6 space-y-3 text-sm text-slate-200">
+          <div className="rounded-2xl border border-slate-800/60 bg-slate-900/60 p-4">
+            <p className="mb-2 text-xs uppercase tracking-wide text-slate-500">Rationale</p>
+            <p className="leading-relaxed">{alert.rationale || 'No rationale recorded yet.'}</p>
           </div>
           {intelSummary && intelSummary !== alert.rationale && (
-            <div className="bg-slate-900/70 border border-sky-500/20 rounded-2xl p-4">
-              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Intel Summary</p>
-              <p className="text-sm text-slate-200 leading-relaxed">{intelSummary}</p>
+            <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4">
+              <p className="mb-2 text-xs uppercase tracking-wide text-sky-300">Intel summary</p>
+              <p className="leading-relaxed">{intelSummary}</p>
             </div>
           )}
-          {(hasActions || hasMitigations) && (
+          {(guidance.length || mitigation.length) && (
             <div className="grid gap-4 md:grid-cols-2">
-              {hasActions && (
-                <div className="space-y-2">
-                  <h4 className="text-xs uppercase tracking-wider text-emerald-300">Recommended Actions</h4>
-                  <ul className="space-y-1 text-sm text-slate-200">
-                    {guidanceActions.map((item) => (
+              {!!guidance.length && (
+                <div>
+                  <h4 className="text-xs uppercase tracking-wide text-emerald-300">Recommended actions</h4>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {guidance.map((item) => (
                       <li key={item} className="flex items-start gap-2">
-                        <span className="mt-1 flex h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+                        <span className="mt-1 h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
                         <span>{item}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-              {hasMitigations && (
-                <div className="space-y-2">
-                  <h4 className="text-xs uppercase tracking-wider text-rose-200">Mitigation Steps</h4>
-                  <ul className="space-y-1 text-sm text-slate-200">
-                    {mitigationSteps.map((item) => (
+              {!!mitigation.length && (
+                <div>
+                  <h4 className="text-xs uppercase tracking-wide text-sky-300">Mitigation steps</h4>
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {mitigation.map((item) => (
                       <li key={item} className="flex items-start gap-2">
-                        <span className="mt-1 flex h-2 w-2 rounded-full bg-rose-400" aria-hidden="true" />
+                        <span className="mt-1 h-2 w-2 rounded-full bg-sky-400" aria-hidden="true" />
                         <span>{item}</span>
                       </li>
                     ))}
@@ -115,74 +132,173 @@ function AlertModal({ alert, onClose, onUpdate }) {
               )}
             </div>
           )}
-        </div>
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={() => onUpdate('Resolved')}
-            className="px-4 py-2 rounded-xl border border-emerald-400/40 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 transition"
-          >
-            Mark Resolved
-          </button>
-          <button
-            type="button"
-            onClick={() => onUpdate('Acknowledged')}
-            className="px-4 py-2 rounded-xl bg-sky-500/80 text-slate-900 font-semibold text-xs hover:bg-sky-400 transition"
-          >
-            Acknowledge
-          </button>
-        </div>
+        </section>
+
+        {error && (
+          <p className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+            {error}
+          </p>
+        )}
+
+        <footer className="mt-6 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+          <span>Status: <span className={`font-semibold ${statusPalette[alert.status] || 'text-slate-300'}`}>{alert.status}</span></span>
+          <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+            <button
+              type="button"
+              onClick={acknowledge}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-200 transition hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={pending}
+            >
+              {pending ? 'Updating�' : 'Acknowledge'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-200 transition hover:bg-slate-800/60"
+            >
+              Close
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );
-}
+};
+
+const useAlerts = (filters) => {
+  return useQuery({
+    queryKey: ['alerts', filters],
+    enabled: !filters.dateRangeInvalid,
+    queryFn: async ({ queryKey }) => {
+      const [, params] = queryKey;
+      const response = await axios.get('/api/v1/alerts', {
+        params: {
+          page: params.page,
+          page_size: params.pageSize,
+          severity: params.severity !== 'All' ? params.severity : undefined,
+          status: params.status !== 'All' ? params.status : undefined,
+          start_date: params.startDate || undefined,
+          end_date: params.endDate || undefined,
+        },
+      });
+
+      const payload = response.data;
+      if (Array.isArray(payload)) {
+        const start = (params.page - 1) * params.pageSize;
+        const end = start + params.pageSize;
+        return {
+          items: payload.slice(start, end),
+          total: payload.length,
+        };
+      }
+      return {
+        items: payload?.items || [],
+        total: payload?.total || 0,
+      };
+    },
+    refetchInterval: 30000,
+    keepPreviousData: true,
+    retry: 1,
+  });
+};
+
+const AlertCard = ({ alert, onSelect }) => (
+  <article className="space-y-2 rounded-2xl border border-slate-800/60 bg-slate-900/40 p-4">
+    <div className="flex items-center justify-between">
+      <h3 className="text-sm font-semibold text-slate-100">{alert.category}</h3>
+      <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${
+        severityStyles[alert.severity] || severityStyles.Low
+      }`}
+      >
+        {alert.severity}
+      </span>
+    </div>
+    <dl className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+      <div>
+        <dt className="uppercase tracking-wide text-slate-500">Detected</dt>
+        <dd>{formatDateTime(alert.detected_at)}</dd>
+      </div>
+      <div className="text-right">
+        <dt className="uppercase tracking-wide text-slate-500">Status</dt>
+        <dd className={`font-semibold ${statusPalette[alert.status] || 'text-slate-300'}`}>{alert.status}</dd>
+      </div>
+      <div className="col-span-2">
+        <dt className="uppercase tracking-wide text-slate-500">Source IP</dt>
+        <dd className="font-mono">{alert.source_ip}</dd>
+      </div>
+      <div className="col-span-2">
+        <dt className="uppercase tracking-wide text-slate-500">Destination IP</dt>
+        <dd className="font-mono">{alert.destination_ip || 'N/A'}</dd>
+      </div>
+    </dl>
+    <button
+      type="button"
+      onClick={() => onSelect(alert)}
+      className="inline-flex w-full items-center justify-center rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-slate-800/60"
+    >
+      View details
+    </button>
+  </article>
+);
 
 export default function AlertsTable() {
-  const queryClient = useQueryClient();
   const { user } = useContext(AuthContext);
-  const { data: alerts = [], isLoading } = useQuery({
-    queryKey: ['alerts'],
-    queryFn: fetchAlerts,
-    refetchInterval: 5000,
-  });
+  const queryClient = useQueryClient();
+
   const [severityFilter, setSeverityFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [selected, setSelected] = useState(null);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const [selectedAlert, setSelectedAlert] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState('');
 
-  const updateStatus = useMutation({
-    mutationFn: ({ id, status }) => axios.post(`/api/v1/alerts/${id}/status`, { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alerts'] }),
-  });
+  const dateRangeInvalid = useMemo(() => {
+    if (!startDate || !endDate) return false;
+    return new Date(startDate) > new Date(endDate);
+  }, [startDate, endDate]);
+
+  const filters = useMemo(
+    () => ({
+      severity: severityFilter,
+      status: statusFilter,
+      startDate,
+      endDate,
+      page,
+      pageSize,
+      dateRangeInvalid,
+    }),
+    [severityFilter, statusFilter, startDate, endDate, page, pageSize, dateRangeInvalid],
+  );
+
+  const {
+    data,
+    isLoading,
+    isFetching,
+    refetch,
+    error,
+  } = useAlerts(filters);
+
+  const alerts = data?.items || [];
+  const total = data?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    setPage(1);
+  }, [severityFilter, statusFilter, startDate, endDate]);
 
   const createIncident = useMutation({
     mutationFn: (payload) => axios.post('/api/v1/alerts', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
       setShowCreate(false);
-      setCreateError('');
     },
-    onError: (mutationError) => {
-      const message = mutationError?.response?.data?.detail?.message || 'Failed to create incident.';
-      setCreateError(message);
+    onError: (err) => {
+      setCreateError(err?.response?.data?.detail?.message || err?.message || 'Failed to create incident.');
     },
   });
-
-  const filteredAlerts = useMemo(() => {
-    return alerts.filter((alert) => {
-      const severityMatch = severityFilter === 'All' || alert.severity === severityFilter;
-      const statusMatch = statusFilter === 'All' || alert.status === statusFilter;
-      return severityMatch && statusMatch;
-    });
-  }, [alerts, severityFilter, statusFilter]);
-
-  const handleUpdate = (status) => {
-    if (selected && status) {
-      updateStatus.mutate({ id: selected.id, status });
-    }
-    setSelected(null);
-  };
 
   const handleCreateIncident = (form) => {
     createIncident.mutate({
@@ -194,17 +310,28 @@ export default function AlertsTable() {
     });
   };
 
+  const fetchError = error?.response?.data?.detail?.message || error?.message || '';
+
+  const canGoPrev = page > 1;
+  const canGoNext = page < totalPages;
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   return (
-    <div className="bg-[#0d172a] border border-slate-800/70 rounded-3xl shadow-[0_18px_50px_rgba(7,16,31,0.55)] relative">
-      <div className="flex items-center justify-between px-6 py-5 border-b border-slate-800/60">
+    <section className="rounded-3xl border border-slate-800/70 bg-[#0d172a] shadow-[0_25px_60px_rgba(8,17,32,0.55)]">
+      <header className="flex flex-col gap-3 border-b border-slate-800/60 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div>
-          <h2 className="text-xl font-semibold text-slate-100">Alerts & Incidents</h2>
+          <h2 className="text-xl font-semibold text-slate-100">Alerts &amp; Incidents</h2>
           <p className="text-xs text-slate-500">Monitor high-impact detections and pivot quickly into response.</p>
         </div>
         {user && (
           <button
             type="button"
-            className="px-4 py-2 rounded-xl bg-emerald-500/90 text-slate-950 font-semibold text-sm hover:bg-emerald-400 transition"
+            className="inline-flex items-center justify-center rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
             onClick={() => {
               setCreateError('');
               setShowCreate(true);
@@ -213,14 +340,15 @@ export default function AlertsTable() {
             + Create Incident
           </button>
         )}
-      </div>
-      <div className="px-6 py-5 grid grid-cols-1 lg:grid-cols-[repeat(4,minmax(0,1fr))] gap-4 border-b border-slate-800/60">
+      </header>
+
+      <div className="grid grid-cols-1 gap-4 border-b border-slate-800/60 px-4 py-5 sm:grid-cols-2 lg:grid-cols-4 sm:px-6">
         <div className="flex flex-col">
-          <label className="text-xs text-slate-500 mb-2 uppercase tracking-wide">Severity</label>
+          <label className="mb-2 text-xs uppercase tracking-wide text-slate-500">Severity</label>
           <select
             value={severityFilter}
             onChange={(event) => setSeverityFilter(event.target.value)}
-            className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+            className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
           >
             <option>All</option>
             <option>High</option>
@@ -229,11 +357,11 @@ export default function AlertsTable() {
           </select>
         </div>
         <div className="flex flex-col">
-          <label className="text-xs text-slate-500 mb-2 uppercase tracking-wide">Status</label>
+          <label className="mb-2 text-xs uppercase tracking-wide text-slate-500">Status</label>
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+            className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
           >
             <option>All</option>
             <option>Open</option>
@@ -242,17 +370,52 @@ export default function AlertsTable() {
           </select>
         </div>
         <div className="flex flex-col">
-          <label className="text-xs text-slate-500 mb-2 uppercase tracking-wide">Start Date</label>
-          <input type="date" className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30" />
+          <label className="mb-2 text-xs uppercase tracking-wide text-slate-500">Start Date</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value)}
+            className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          />
         </div>
         <div className="flex flex-col">
-          <label className="text-xs text-slate-500 mb-2 uppercase tracking-wide">End Date</label>
-          <input type="date" className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30" />
+          <label className="mb-2 text-xs uppercase tracking-wide text-slate-500">End Date</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(event) => setEndDate(event.target.value)}
+            className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          />
         </div>
       </div>
-      <div className="overflow-x-auto">
+
+      {fetchError && (
+        <p className="px-4 py-3 text-xs text-rose-200 sm:px-6">
+          {fetchError}{' '}
+          <button type="button" className="underline" onClick={() => refetch()}>
+            Retry
+          </button>
+        </p>
+      )}
+      {dateRangeInvalid && (
+        <p className="px-4 py-3 text-xs text-amber-300 sm:px-6">
+          Invalid date range. Start date must be before end date.
+        </p>
+      )}
+
+      <div className="space-y-3 border-b border-slate-800/60 px-4 py-4 md:hidden sm:px-6">
+        {isLoading && <p className="text-xs text-slate-500">Loading alerts...</p>}
+        {!isLoading && alerts.map((alert) => (
+          <AlertCard key={alert.id} alert={alert} onSelect={setSelectedAlert} />
+        ))}
+        {!isLoading && !alerts.length && !fetchError && !dateRangeInvalid && (
+          <p className="text-xs text-slate-500">No alerts match the current filters.</p>
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
         <table className="min-w-full text-sm text-slate-300">
-          <thead className="text-xs uppercase text-slate-500 bg-slate-900/60">
+          <thead className="bg-slate-900/60 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-6 py-3">Date</th>
               <th className="px-6 py-3">Alert Type</th>
@@ -271,12 +434,15 @@ export default function AlertsTable() {
                 </td>
               </tr>
             )}
-            {!isLoading && filteredAlerts.map((alert) => (
-              <tr key={alert.id} className="hover:bg-slate-900/40 transition">
-                <td className="px-6 py-4 text-slate-400 text-xs">{new Date(alert.detected_at).toLocaleString()}</td>
+            {!isLoading && alerts.map((alert) => (
+              <tr key={alert.id} className="transition hover:bg-slate-900/40">
+                <td className="px-6 py-4 text-xs text-slate-400">{formatDateTime(alert.detected_at)}</td>
                 <td className="px-6 py-4 font-medium text-slate-100">{alert.category}</td>
                 <td className="px-6 py-4">
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${severityStyles[alert.severity] || severityStyles.Low}`}>
+                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                    severityStyles[alert.severity] || severityStyles.Low
+                  }`}
+                  >
                     {alert.severity}
                   </span>
                 </td>
@@ -292,17 +458,17 @@ export default function AlertsTable() {
                 <td className="px-6 py-4 text-right">
                   <button
                     type="button"
-                    onClick={() => setSelected(alert)}
-                    className="text-sky-400 hover:text-sky-300 text-xs font-semibold"
+                    onClick={() => setSelectedAlert(alert)}
+                    className="text-xs font-semibold text-sky-400 transition hover:text-sky-300"
                   >
                     View
                   </button>
                 </td>
               </tr>
             ))}
-            {!isLoading && filteredAlerts.length === 0 && (
+            {!isLoading && !alerts.length && !fetchError && !dateRangeInvalid && (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center text-slate-500 text-sm">
+                <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
                   No alerts match the current filters.
                 </td>
               </tr>
@@ -310,14 +476,40 @@ export default function AlertsTable() {
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between px-6 py-4 text-xs text-slate-500 border-t border-slate-800/60">
-        <span>Showing {filteredAlerts.length} of {alerts.length} alerts</span>
-        <div className="flex items-center gap-3">
-          <button type="button" className="px-3 py-1 rounded-lg border border-slate-800 hover:bg-slate-900/60 transition">Previous</button>
-          <button type="button" className="px-3 py-1 rounded-lg border border-slate-800 hover:bg-slate-900/60 transition">Next</button>
+
+      <footer className="flex flex-col gap-3 border-t border-slate-800/60 px-4 py-4 text-center text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:text-left">
+        <span>
+          Showing {alerts.length ? (page - 1) * pageSize + 1 : 0}-
+          {Math.min(page * pageSize, total)} of {total} alerts
+        </span>
+        <div className="flex items-center justify-center gap-3 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+            className="rounded-lg border border-slate-800 px-3 py-1 transition hover:bg-slate-900/60 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!canGoPrev || isFetching}
+          >
+            Previous
+          </button>
+          <span>
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+            className="rounded-lg border border-slate-800 px-3 py-1 transition hover:bg-slate-900/60 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!canGoNext || isFetching}
+          >
+            Next
+          </button>
         </div>
-      </div>
-      <AlertModal alert={selected} onClose={() => setSelected(null)} onUpdate={handleUpdate} />
+      </footer>
+
+      <AlertModal
+        alert={selectedAlert}
+        onClose={() => setSelectedAlert(null)}
+        onRefresh={() => refetch()}
+      />
       {showCreate && (
         <CreateIncidentModal
           onCreate={handleCreateIncident}
@@ -329,6 +521,6 @@ export default function AlertsTable() {
           errorMessage={createError}
         />
       )}
-    </div>
+    </section>
   );
 }

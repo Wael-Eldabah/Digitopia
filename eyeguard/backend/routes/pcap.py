@@ -5,9 +5,11 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from scapy.all import rdpcap, Packet, PcapReader  # Added for PCAP parsing
+from scapy.layers.inet import IP
 
 from ..config import get_settings
 from ..logging_config import logger
@@ -20,7 +22,6 @@ from ..models.schemas import (
     User,
 )
 from ..services import alerting, ti_aggregator
-from ..services.pcap_parser import PcapParsingError, parse_pcap
 from ..utils.auth import get_current_user
 from ..utils.ip_tools import normalize_ip
 from ..utils.state import state_store
@@ -29,7 +30,60 @@ settings = get_settings()
 router = APIRouter(prefix="/api/pcap", tags=["pcap"])
 
 ALLOWED_EXTENSIONS = {".pcap", ".pcapng"}
+PCAP_MAGIC_NUMBERS = {b"\xa1\xb2\xc3\xd4", b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\x3c\x4d", b"\x4d\x3c\xb2\xa1"}  # PCAP and PCAPNG
 
+class PcapParsingError(Exception):
+    pass
+
+def validate_pcap_header(file_path: str) -> bool:
+    """Validate the PCAP file's magic number to ensure it's a valid PCAP/PCAPNG file."""
+    try:
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+            return magic in PCAP_MAGIC_NUMBERS
+    except Exception as e:
+        logger.warning("pcap.header_validation_failed", error=str(e))
+        return False
+
+def parse_pcap(file_path: str) -> Dict[str, Any]:
+    """Parse a PCAP file and return a summary of its contents."""
+    try:
+        # Validate file header first
+        if not validate_pcap_header(file_path):
+            raise PcapParsingError("Invalid PCAP/PCAPNG header: incorrect magic number")
+
+        packets = rdpcap(file_path)  # Use scapy to read PCAP/PCAPNG
+        total_packets = len(packets)
+        unique_ips = set()
+        protocol_counts = {}
+        ip_packet_counts = {}
+
+        for pkt in packets:
+            # Count protocols (simplified, assuming Ethernet + IP)
+            if pkt.haslayer(IP):
+                proto = pkt[IP].proto
+                protocol_name = {6: "TCP", 17: "UDP"}.get(proto, f"Protocol_{proto}")
+                protocol_counts[protocol_name] = protocol_counts.get(protocol_name, 0) + 1
+                # Collect IPs
+                src_ip = pkt[IP].src
+                dst_ip = pkt[IP].dst
+                unique_ips.add(src_ip)
+                unique_ips.add(dst_ip)
+                ip_packet_counts[src_ip] = ip_packet_counts.get(src_ip, 0) + 1
+                ip_packet_counts[dst_ip] = ip_packet_counts.get(dst_ip, 0) + 1
+
+        # Sort IPs by packet count
+        top_ips = [{"ip": ip, "packet_count": count} for ip, count in
+                   sorted(ip_packet_counts.items(), key=lambda x: x[1], reverse=True)[:10]]
+
+        return {
+            "total_packets": total_packets,
+            "unique_ips": list(unique_ips),
+            "top_ips": top_ips,
+            "protocol_counts": protocol_counts,
+        }
+    except Exception as e:
+        raise PcapParsingError(f"Failed to parse PCAP file: {str(e)}")
 
 def _ensure_upload_dir(user_id: str) -> str:
     uploads_root = os.path.abspath(settings.uploads_path)
@@ -37,12 +91,12 @@ def _ensure_upload_dir(user_id: str) -> str:
     os.makedirs(user_dir, exist_ok=True)
     return user_dir
 
-
 @router.post("/upload", response_model=PcapUploadResponse)
 async def upload_pcap(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ) -> PcapUploadResponse:
+    # Validate file extension
     extension = os.path.splitext(file.filename or "")[1].lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail={"ok": False, "error": "Only .pcap or .pcapng files are supported."})
@@ -53,39 +107,50 @@ async def upload_pcap(
     output_name = f"{timestamp}_{safe_name}"
     output_path = os.path.join(uploads_dir, output_name)
 
+    # Save file with size limit check
     size_limit = settings.pcap_max_size_mb * 1024 * 1024
     total_bytes = 0
-    with open(output_path, "wb") as destination:
-        while chunk := await file.read(1024 * 1024):
-            total_bytes += len(chunk)
-            if total_bytes > size_limit:
-                await file.close()
-                os.remove(output_path)
-                raise HTTPException(status_code=400, detail={"ok": False, "error": "PCAP exceeds configured size limit."})
-            destination.write(chunk)
-    await file.close()
+    try:
+        with open(output_path, "wb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > size_limit:
+                    await file.close()
+                    os.remove(output_path)
+                    raise HTTPException(status_code=400, detail={"ok": False, "error": f"PCAP exceeds size limit of {settings.pcap_max_size_mb} MB"})
+                destination.write(chunk)
+    except Exception as e:
+        await file.close()
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        raise HTTPException(status_code=500, detail={"ok": False, "error": f"Failed to save file: {str(e)}"})
+    finally:
+        await file.close()
 
+    # Parse the PCAP file
     try:
         summary = parse_pcap(output_path)
     except PcapParsingError as exc:
         logger.warning("pcap.parse_failed", error=str(exc))
-        raise HTTPException(status_code=500, detail={"ok": False, "error": str(exc)}) from exc
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        raise HTTPException(status_code=400, detail={"ok": False, "error": f"Invalid PCAP file: {str(exc)}"})
 
     malicious_indicators: List[str] = []
     alerts_info: List[Dict[str, Any]] = []
     ip_payloads: List[Dict[str, Any]] = []
 
     enrichment_limit = max(settings.pcap_enrichment_ip_limit, 0)
-    top_ip_entries = summary.top_ips or []
-    if not top_ip_entries and summary.unique_ips:
+    top_ip_entries = summary.get("top_ips", [])
+    if not top_ip_entries and summary.get("unique_ips"):
         tentative_limit = enrichment_limit or 10
-        top_ip_entries = [{"ip": ip, "packet_count": 0} for ip in summary.unique_ips[:tentative_limit]]
+        top_ip_entries = [{"ip": ip, "packet_count": 0} for ip in summary["unique_ips"][:tentative_limit]]
 
     for index, entry in enumerate(top_ip_entries):
-        ip = entry.get('ip')
+        ip = entry.get("ip")
         if not ip:
             continue
-        packet_count = entry.get('packet_count', 0)
+        packet_count = entry.get("packet_count", 0)
         normalized = normalize_ip(ip)
         payload = {
             "ip": normalized,
@@ -104,9 +169,6 @@ async def upload_pcap(
         if should_enrich:
             try:
                 result = await ti_aggregator.lookup_indicator("ip", normalized, user_id=current_user.id)
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.warning("pcap.ti_lookup_failed", ip=normalized, error=str(exc))
-            else:
                 verdict = result.aggregated_summary or {}
                 payload["source_results"] = result.source_results
                 payload["aggregated_summary"] = verdict
@@ -122,15 +184,17 @@ async def upload_pcap(
                         "severity": severity_label.upper(),
                         "message": message,
                     })
+            except Exception as exc:
+                logger.warning("pcap.ti_lookup_failed", ip=normalized, error=str(exc))
         ip_payloads.append(payload)
 
     has_alerts = bool(malicious_indicators)
     report_summary = {
         "description": f"PCAP {safe_name} processed",
-        "total_packets": summary.total_packets,
-        "unique_ips": len(summary.unique_ips),
+        "total_packets": summary.get("total_packets", 0),
+        "unique_ips": len(summary.get("unique_ips", [])),
         "malicious_ips": len(malicious_indicators),
-        "protocol_counts": summary.protocol_counts,
+        "protocol_counts": summary.get("protocol_counts", {}),
     }
 
     created_at = datetime.utcnow()
@@ -147,7 +211,6 @@ async def upload_pcap(
         "source_file": safe_name,
     }
 
-    # Store analysis and register any generated alerts
     async with state_store._lock:  # type: ignore[attr-defined]
         state_store.save_pcap_analysis(analysis_record)
         state_store.reports[report_id] = Report(
@@ -183,7 +246,7 @@ async def upload_pcap(
                 "created_at": created_at,
                 "severity": alert.severity,
                 "sources": [alert_entry["severity"].lower()],
-                "recommended_action": alert.action_taken or (alert.playbook or 'Review PCAP response playbook'),
+                "recommended_action": alert.action_taken or (alert.playbook or "Review PCAP response playbook"),
                 "rationale": alert.rationale,
             })
         state_store.log_activity(
@@ -192,8 +255,8 @@ async def upload_pcap(
             metadata={
                 "report_id": report_id,
                 "file": safe_name,
-                "total_packets": summary.total_packets,
-                "unique_ips": len(summary.unique_ips),
+                "total_packets": summary.get("total_packets", 0),
+                "unique_ips": len(summary.get("unique_ips", [])),
                 "malicious_ips": len(malicious_indicators),
             },
         )
@@ -220,13 +283,11 @@ async def upload_pcap(
         alerts_triggered=alerts_info,
     )
 
-
 @router.get("/analyses", response_model=List[PcapAnalysisSummary])
 async def list_pcap_analyses(current_user: User = Depends(get_current_user)) -> List[PcapAnalysisSummary]:
     async with state_store._lock:  # type: ignore[attr-defined]
         analyses = state_store.list_pcap_analyses(current_user.id)
     return [PcapAnalysisSummary(**entry) for entry in analyses]
-
 
 @router.get("/analyses/{analysis_id}", response_model=PcapAnalysisDetail)
 async def get_pcap_analysis(analysis_id: str, current_user: User = Depends(get_current_user)) -> PcapAnalysisDetail:

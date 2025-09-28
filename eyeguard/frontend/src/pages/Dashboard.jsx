@@ -11,10 +11,11 @@ const fetchDevices = async () => {
 };
 
 export default function Dashboard() {
-  const { data: devices = [] } = useQuery({
+  const { data: devices = [], isLoading } = useQuery({
     queryKey: ['devices'],
     queryFn: fetchDevices,
-    refetchInterval: 1000,
+    refetchInterval: 30000,
+    staleTime: 15000,
   });
 
   const metrics = useMemo(() => {
@@ -44,18 +45,23 @@ export default function Dashboard() {
 
       <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <div className="bg-[#0d172a] border border-slate-800/70 rounded-3xl p-6 shadow-[0_25px_60px_rgba(8,17,32,0.55)] space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Network Intelligence Grid</h2>
               <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Device density vs. traffic throughput</p>
             </div>
-            <span className="text-xs text-slate-500 font-mono">Auto-refresh 1s</span>
+            <span className="text-xs font-mono text-slate-500">Auto-refresh 30s</span>
           </div>
-          <NetworkMap devices={devices} />
+          <div className="min-h-[240px] w-full overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-900/40">
+            <NetworkMap devices={devices} />
+            {isLoading && (
+              <p className="p-4 text-center text-xs text-slate-500">Loading devices...</p>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-6">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="bg-[#101b30] border border-slate-800/70 rounded-2xl p-4 shadow-inner shadow-slate-900/40">
               <p className="text-xs uppercase tracking-widest text-slate-500">Total Devices</p>
               <p className="text-3xl font-semibold text-slate-100 mt-2">{metrics.total}</p>
@@ -74,7 +80,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="bg-[#101b30] border border-slate-800/70 rounded-3xl p-6 space-y-4 shadow-[0_18px_50px_rgba(7,15,30,0.45)]">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-lg font-semibold">Device Feed</h3>
               <span className="text-xs text-slate-500">Sorted by recency</span>
             </div>
@@ -86,12 +92,12 @@ export default function Dashboard() {
                 const directionLabel = trendingUp ? 'UP' : 'DOWN';
                 const color = trendingUp ? 'text-emerald-300' : 'text-amber-300';
                 return (
-                  <li key={device.id} className="flex items-center justify-between bg-slate-900/60 border border-slate-800/60 rounded-2xl px-4 py-3">
+                  <li key={device.id} className="flex flex-col gap-3 bg-slate-900/60 border border-slate-800/60 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-100">{device.hostname}</p>
                       <p className="text-xs text-slate-500 font-mono">{device.ip_address}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <p className="text-xs text-slate-500 uppercase">Traffic</p>
                       <p className={`text-sm font-semibold ${color}`}>
                         {device.traffic_gb.toFixed(2)} GB
