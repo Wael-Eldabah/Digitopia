@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import csv
+import json
 from io import BytesIO, StringIO
-from typing import List
+from textwrap import wrap
+from typing import Any, List
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
@@ -21,25 +23,106 @@ def _clone_report(report: Report) -> Report:
     return Report(**report.model_dump())
 
 
+
+
+def _stringify(value: Any) -> str:
+    if value is None:
+        return 'N/A'
+    if isinstance(value, str):
+        return value or 'N/A'
+    if isinstance(value, (list, dict)) and not value:
+        return 'N/A'
+    try:
+        return json.dumps(value, default=str, ensure_ascii=False, indent=2)
+    except TypeError:
+        return str(value)
+
+
+def _extract_indicators(report: ReportDetail) -> list[str]:
+    indicators: list[str] = []
+
+    summary = report.summary
+    if isinstance(summary, dict):
+        candidate = summary.get('indicators') or summary.get('indicator')
+        if isinstance(candidate, str):
+            indicators.append(candidate)
+        elif isinstance(candidate, (list, tuple, set)):
+            indicators.extend(str(item) for item in candidate if item)
+
+    payload = report.payload if isinstance(report.payload, dict) else {}
+    if isinstance(payload, dict):
+        candidate = payload.get('indicators')
+        if isinstance(candidate, str):
+            indicators.append(candidate)
+        elif isinstance(candidate, (list, tuple, set)):
+            indicators.extend(str(item) for item in candidate if item)
+        for entry in payload.get('alerts', []):
+            indicator = entry.get('indicator')
+            if indicator:
+                indicators.append(str(indicator))
+        for entry in payload.get('ips', []):
+            ip = entry.get('ip')
+            if ip:
+                indicators.append(str(ip))
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for indicator in indicators:
+        normalized = str(indicator).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        cleaned.append(normalized)
+    return cleaned
+
+
+def _write_multiline(text_object, heading: str, content: str) -> None:
+    text_object.textLine('')
+    text_object.textLine(heading)
+    normalized = content if content.strip() else 'N/A'
+    for raw_line in normalized.splitlines():
+        segments = wrap(raw_line, 85)
+        if not segments:
+            text_object.textLine(raw_line)
+        else:
+            for segment in segments:
+                text_object.textLine(segment)
+
+
 def _build_pdf(report: ReportDetail) -> bytes:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter)
     text_object = pdf.beginText(40, 750)
     text_object.textLine("EyeGuard Incident Report")
     text_object.textLine("")
-    lines = [
-        f"Report ID: {report.id}",
-        f"Alert ID: {report.alert_id}",
-        f"Summary: {report.summary}",
-        f"Remediation: {report.remediation_steps or 'N/A'}",
-    ]
-    text_object.textLine("")
-    for line in lines:
-        text_object.textLine(line)
-    text_object.textLine("")
-    text_object.textLine("Indicators:")
-    for indicator in report.indicators:
-        text_object.textLine(f"- {indicator}")
+    created_at = getattr(report, 'created_at', None)
+    created_value = created_at.isoformat() if created_at else 'N/A'
+    text_object.textLine(f"Report ID: {report.id}")
+    text_object.textLine(f"Title: {report.title or 'N/A'}")
+    text_object.textLine(f"Type: {report.type}")
+    text_object.textLine(f"Created At: {created_value}")
+    text_object.textLine(f"Contains Alerts: {'Yes' if report.has_alerts else 'No'}")
+
+    summary_text = _stringify(report.summary)
+    _write_multiline(text_object, 'Summary:', summary_text)
+
+    indicators = _extract_indicators(report)
+    if indicators:
+        text_object.textLine('')
+        text_object.textLine('Indicators:')
+        for indicator in indicators:
+            segments = wrap(indicator, 85)
+            if not segments:
+                text_object.textLine(f"- {indicator}")
+            else:
+                for index, segment in enumerate(segments):
+                    prefix = '- ' if index == 0 else '  '
+                    text_object.textLine(f"{prefix}{segment}")
+
+    payload_text = _stringify(report.payload)
+    if payload_text != 'N/A':
+        _write_multiline(text_object, 'Payload Details:', payload_text)
+
     pdf.drawText(text_object)
     pdf.showPage()
     pdf.save()
@@ -71,15 +154,24 @@ async def export_report_csv(report_id: str) -> StreamingResponse:
     report_detail = await get_report(report_id)
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["field", "value"])
-    writer.writerow(["report_id", report_detail.id])
-    writer.writerow(["alert_id", report_detail.alert_id])
-    writer.writerow(["summary", report_detail.summary])
-    writer.writerow(["remediation", report_detail.remediation_steps or ""])
-    writer.writerow(["indicators", ";".join(report_detail.indicators)])
+    writer.writerow(['field', 'value'])
+    created_at = getattr(report_detail, 'created_at', None)
+    created_value = created_at.isoformat() if created_at else ''
+    writer.writerow(['report_id', report_detail.id])
+    writer.writerow(['title', report_detail.title or ''])
+    writer.writerow(['type', report_detail.type])
+    writer.writerow(['created_at', created_value])
+    writer.writerow(['has_alerts', 'yes' if report_detail.has_alerts else 'no'])
+    writer.writerow(['summary', _stringify(report_detail.summary)])
+    indicators = _extract_indicators(report_detail)
+    if indicators:
+        writer.writerow(['indicators', '; '.join(indicators)])
+    payload_text = _stringify(report_detail.payload)
+    if payload_text != 'N/A':
+        writer.writerow(['payload', payload_text])
     output.seek(0)
     headers = {"Content-Disposition": f"attachment; filename=report-{report_detail.id}.csv"}
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+    return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers=headers)
 
 
 @router.get("/reports/{report_id}/export.pdf")

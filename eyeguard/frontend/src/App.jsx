@@ -30,14 +30,66 @@ export const AuthContext = createContext({
 });
 
 function ProtectedLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen) {
+      return;
+    }
+    const handleKey = (event) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [sidebarOpen]);
+
   return (
-    <div className="flex">
-      <Sidebar />
-      <main className="flex-1 min-h-screen bg-[#070d18] text-slate-100">
-        <div className="p-8">
-          <Outlet />
-        </div>
-      </main>
+    <div className="flex min-h-screen bg-[#070d18] text-slate-100">
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center justify-between gap-3 border-b border-slate-800/60 bg-[#070d18]/95 px-4 py-3 backdrop-blur lg:hidden">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-700 p-2 text-slate-200 transition hover:bg-slate-800/60"
+            aria-label="Open sidebar"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h16" />
+            </svg>
+          </button>
+          <span className="text-sm font-semibold text-slate-200">EyeGuard Console</span>
+          <span className="w-10" />
+        </header>
+        <main className="flex-1 overflow-x-hidden">
+          <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -106,7 +158,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (session?.token && !session?.user) {
+    if (session?.token) {
       refreshProfile();
     }
   }, [session?.token]);

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .logging_config import logger, setup_logging
-from .routes import alerts, auth, devices, health, reports, search, settings as settings_routes, simulation
+from .routes import alerts, auth, devices, health, reports, search, settings as settings_routes, simulation, pcap
 
 setup_logging()
 settings = get_settings()
@@ -45,6 +45,7 @@ app.include_router(search.ip_router)
 app.include_router(devices.router)
 app.include_router(alerts.router)
 app.include_router(reports.router)
+app.include_router(pcap.router)
 app.include_router(simulation.router)
 app.include_router(settings_routes.router)
 
