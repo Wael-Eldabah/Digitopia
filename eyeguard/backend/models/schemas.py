@@ -259,6 +259,7 @@ class IntegrationKeys(BaseSchema):
     vt_api_key: Optional[str] = None
     otx_api_key: Optional[str] = None
     abuse_api_key: Optional[str] = None
+    shodan_api_key: Optional[str] = None
 
 
 

@@ -30,9 +30,13 @@ export default function SimulationPage() {
       } catch (checkErr) {
         setStatusMessage(null);
       }
-      const response = await axios.post('/api/v1/simulation/devices', {
-        ...form,
-      });
+      const payload = {
+        ip_address: form.ip_address,
+        hostname: form.hostname,
+        device_type: form.device_type,
+        traffic_gb: 2.5,
+      };
+      const response = await axios.post('/api/v1/simulation/devices', payload);
       startSession(response.data);
     } catch (err) {
       const message = err?.response?.data?.detail?.message

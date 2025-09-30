@@ -262,27 +262,79 @@ export default function Dashboard() {
       </header>
 
       <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-        <div className="bg-[#0d172a] border border-slate-800/70 rounded-3xl p-6 shadow-[0_25px_60px_rgba(8,17,32,0.55)] space-y-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                Network Intelligence Grid
-              </h2>
-              <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-                Device density vs. traffic throughput
-              </p>
+        <div className="space-y-6">
+          <div className="bg-[#0d172a] border border-slate-800/70 rounded-3xl p-6 shadow-[0_25px_60px_rgba(8,17,32,0.55)] space-y-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">
+                  Network Intelligence Grid
+                </h2>
+                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+                  Device density vs. traffic throughput
+                </p>
+              </div>
+              <span className="text-xs font-mono text-slate-500">
+                Auto-refresh 1s
+              </span>
             </div>
-            <span className="text-xs font-mono text-slate-500">
-              Auto-refresh 1s
-            </span>
+            <div className="min-h-[240px] w-full overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-900/40">
+              <NetworkMap devices={devices} />
+              {isLoading && (
+                <p className="p-4 text-center text-xs text-slate-500">
+                  Loading devices...
+                </p>
+              )}
+            </div>
           </div>
-          <div className="min-h-[240px] w-full overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-900/40">
-            <NetworkMap devices={devices} />
-            {isLoading && (
-              <p className="p-4 text-center text-xs text-slate-500">
-                Loading devices...
-              </p>
-            )}
+
+          <div className="bg-[#101b30] border border-slate-800/70 rounded-3xl p-6 space-y-4 shadow-[0_18px_50px_rgba(7,15,30,0.45)]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-lg font-semibold">Device Feed</h3>
+              <span className="text-xs text-slate-500">Sorted by recency</span>
+            </div>
+            <ul className="space-y-3">
+              {devices.map((device) => {
+                const trendingUp = (device.traffic_delta ?? 0) >= 0;
+                const delta = Math.abs(device.traffic_delta ?? 0).toFixed(2);
+                const deltaSign = trendingUp ? "+" : "-";
+                const directionLabel = trendingUp ? "UP" : "DOWN";
+                const color = trendingUp
+                  ? "text-emerald-300"
+                  : "text-amber-300";
+                return (
+                  <li
+                    key={device.id}
+                    className="flex flex-col gap-3 bg-slate-900/60 border border-slate-800/60 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">
+                        {device.hostname}
+                      </p>
+                      <p className="text-xs text-slate-500 font-mono">
+                        {device.ip_address}
+                      </p>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <p className="text-xs text-slate-500 uppercase">
+                        Traffic
+                      </p>
+                      <p className={`text-sm font-semibold ${color}`}>
+                        {device.traffic_gb.toFixed(2)} GB
+                        <span className="ml-2 text-xs text-slate-400">
+                          {directionLabel} {deltaSign}
+                          {delta}
+                        </span>
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+              {!devices.length && (
+                <li className="text-sm text-slate-500">
+                  No devices registered yet.
+                </li>
+              )}
+            </ul>
           </div>
         </div>
 
@@ -292,7 +344,7 @@ export default function Dashboard() {
               <p className="text-xs uppercase tracking-widest text-slate-500">
                 Total Devices
               </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-100">
+              <p className="mt-2 text-3xl font-semibold text-slate-100">
                 {metrics.total}
               </p>
             </div>
@@ -300,7 +352,7 @@ export default function Dashboard() {
               <p className="text-xs uppercase tracking-widest text-slate-500">
                 Online
               </p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-300">
+              <p className="mt-2 text-3xl font-semibold text-emerald-300">
                 {metrics.online}
               </p>
             </div>
@@ -310,7 +362,7 @@ export default function Dashboard() {
             <p className="text-xs uppercase tracking-widest text-slate-500">
               Total Traffic
             </p>
-            <p className="mt-2 text-2xl font-semibold text-sky-300">
+            <p className="mt-2 text-3xl font-semibold text-sky-300">
               {metrics.traffic.toFixed(1)} GB
             </p>
           </div>
@@ -398,6 +450,9 @@ export default function Dashboard() {
               className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-slate-300 transition hover:text-slate-100 focus:outline-none"
             >
               <span>{isListOpen ? 'Hide' : 'View'} Blocked IPs List</span>
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 bg-slate-900/80 text-[11px] text-slate-200">
+                {isListOpen ? '-' : '+'}
+              </span>
               <span className="text-[10px] text-slate-500">{blocklistEntries.length}</span>
             </button>
             {isListOpen && (
@@ -431,58 +486,9 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-
-          <div className="bg-[#101b30] border border-slate-800/70 rounded-3xl p-6 space-y-4 shadow-[0_18px_50px_rgba(7,15,30,0.45)]">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="text-lg font-semibold">Device Feed</h3>
-              <span className="text-xs text-slate-500">Sorted by recency</span>
-            </div>
-            <ul className="space-y-3">
-              {devices.map((device) => {
-                const trendingUp = (device.traffic_delta ?? 0) >= 0;
-                const delta = Math.abs(device.traffic_delta ?? 0).toFixed(2);
-                const deltaSign = trendingUp ? "+" : "-";
-                const directionLabel = trendingUp ? "UP" : "DOWN";
-                const color = trendingUp
-                  ? "text-emerald-300"
-                  : "text-amber-300";
-                return (
-                  <li
-                    key={device.id}
-                    className="flex flex-col gap-3 bg-slate-900/60 border border-slate-800/60 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-slate-100">
-                        {device.hostname}
-                      </p>
-                      <p className="text-xs text-slate-500 font-mono">
-                        {device.ip_address}
-                      </p>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <p className="text-xs text-slate-500 uppercase">
-                        Traffic
-                      </p>
-                      <p className={`text-sm font-semibold ${color}`}>
-                        {device.traffic_gb.toFixed(2)} GB
-                        <span className="ml-2 text-xs text-slate-400">
-                          {directionLabel} {deltaSign}
-                          {delta}
-                        </span>
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-              {!devices.length && (
-                <li className="text-sm text-slate-500">
-                  No devices registered yet.
-                </li>
-              )}
-            </ul>
-          </div>
         </div>
       </section>
+
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Active Alerts</h2>

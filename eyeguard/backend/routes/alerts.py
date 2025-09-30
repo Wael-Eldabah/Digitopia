@@ -80,7 +80,7 @@ async def update_alert_status(
     current_user: User = Depends(get_current_user),
 ) -> Alert:
     requested_status = str(payload.status or "").title()
-    allowed = {"Open", "Acknowledged", "Resolved"}
+    allowed = {"Open", "Acknowledged", "In Progress", "Resolved"}
     if requested_status not in allowed:
         raise HTTPException(
             status_code=400,

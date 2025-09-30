@@ -185,6 +185,21 @@ class StateStore:
         }
         return token
 
+    def validate_reset_token(self, email: str, token: str) -> Optional[str]:
+        if not email or not token:
+            return None
+        user_id = self.find_user_id_by_email(email)
+        if not user_id:
+            return None
+        record = self.password_reset_tokens.get(user_id)
+        if not record:
+            return None
+        expected = record.get("token")
+        if not expected or not secrets.compare_digest(str(expected), str(token)):
+            return None
+        self.password_reset_tokens.pop(user_id, None)
+        return user_id
+
     def reset_user_password(self, user_id: str, new_password: str) -> None:
         self.user_credentials[user_id] = self._hash_password(new_password)
         self.log_activity(user_id, "user.password.reset", {"user_id": user_id})
@@ -440,18 +455,20 @@ class StateStore:
             "vt_api_key": self.integration_keys.get("vt_api_key"),
             "otx_api_key": self.integration_keys.get("otx_api_key"),
             "abuse_api_key": self.integration_keys.get("abuse_api_key"),
+            "shodan_api_key": self.integration_keys.get("shodan_api_key"),
         }
 
     def integration_keys_revision(self) -> int:
         return self.integration_revision
 
     def set_integration_keys(
-        self, *, vt_api_key: Optional[str] = None, otx_api_key: Optional[str] = None, abuse_api_key: Optional[str] = None
+        self, *, vt_api_key: Optional[str] = None, otx_api_key: Optional[str] = None, abuse_api_key: Optional[str] = None, shodan_api_key: Optional[str] = None
     ) -> Dict[str, Optional[str]]:
         payload = {
             "vt_api_key": vt_api_key.strip() if isinstance(vt_api_key, str) and vt_api_key.strip() else None,
             "otx_api_key": otx_api_key.strip() if isinstance(otx_api_key, str) and otx_api_key.strip() else None,
             "abuse_api_key": abuse_api_key.strip() if isinstance(abuse_api_key, str) and abuse_api_key.strip() else None,
+            "shodan_api_key": shodan_api_key.strip() if isinstance(shodan_api_key, str) and shodan_api_key.strip() else None,
         }
         changed: Dict[str, str] = {}
         for key, value in payload.items():

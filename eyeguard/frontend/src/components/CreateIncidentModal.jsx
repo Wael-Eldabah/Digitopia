@@ -1,7 +1,7 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
 import React, { useState } from 'react';
 
-const severities = ['High', 'Medium', 'Low'];
+const severities = ['Critical', 'High', 'Medium', 'Low'];
 
 export default function CreateIncidentModal({ onCreate, onClose, isSubmitting, errorMessage }) {
   const [form, setForm] = useState({

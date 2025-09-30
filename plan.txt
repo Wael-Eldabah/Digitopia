@@ -1,7 +1,0 @@
-1. Audit repo state (migrations, services, routes, frontend) to identify incomplete/erroneous changes.
-2. Restore stable baseline for schema/models/services; design new DB migrations (idempotent) and align with Pydantic schemas.
-3. Rebuild backend features: TI aggregator, report service, blocklist, pcap route, indicator search, simulation persistence, alerts API; ensure dependency injection and logging.
-4. Update frontend (Threat Search & PCAP tab, Settings page, Simulation page) to match backend APIs; add components for blocklist, alert emails, avatar color, pcap flow.
-5. Wire SMTP emailing securely via env config; ensure no secrets on client.
-6. Add migrations/tests (backend + frontend adjustments), run formatting, tests, and manual sanity checks.
-7. Final cleanup: remove dead files, document env vars, deliverables, and instructions.

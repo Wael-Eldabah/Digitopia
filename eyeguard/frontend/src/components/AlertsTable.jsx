@@ -6,32 +6,35 @@ import AuthContext from '../context/AuthContext.jsx';
 import CreateIncidentModal from './CreateIncidentModal.jsx';
 
 const severityStyles = {
-  High: 'bg-rose-500/15 text-rose-300 border border-rose-400/30',
-  Medium: 'bg-amber-500/15 text-amber-300 border border-amber-400/30',
-  Low: 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/20',
+  Critical: 'bg-rose-600/20 text-rose-100 border border-rose-500/40',
+  High: 'bg-orange-500/20 text-orange-100 border border-orange-400/40',
+  Medium: 'bg-amber-400/25 text-amber-100 border border-amber-300/40',
+  Low: 'bg-emerald-500/20 text-emerald-100 border border-emerald-400/40',
+  Info: 'bg-sky-500/20 text-sky-100 border border-sky-400/40',
 };
 
 const statusPalette = {
   Open: 'text-amber-300',
-  Resolved: 'text-emerald-300',
+  'In Progress': 'text-indigo-300',
   Acknowledged: 'text-sky-300',
+  Resolved: 'text-emerald-300',
 };
 
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : 'N/A');
 
 const AlertModal = ({ alert, onClose, onRefresh }) => {
-  const [pending, setPending] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState('');
   const [error, setError] = useState('');
 
   if (!alert) {
     return null;
   }
 
-  const acknowledge = async () => {
+  const updateStatus = async (nextStatus) => {
     try {
-      setPending(true);
+      setPendingStatus(nextStatus);
       setError('');
-      await axios.post(`/api/v1/alerts/${alert.id}/status`, { status: 'Acknowledged' });
+      await axios.post(`/api/v1/alerts/${alert.id}/status`, { status: nextStatus });
       onRefresh?.();
       onClose();
     } catch (ackErr) {
@@ -39,7 +42,7 @@ const AlertModal = ({ alert, onClose, onRefresh }) => {
         ackErr?.response?.data?.detail?.message || ackErr?.message || 'Unable to update alert status.',
       );
     } finally {
-      setPending(false);
+      setPendingStatus('');
     }
   };
 
@@ -48,6 +51,12 @@ const AlertModal = ({ alert, onClose, onRefresh }) => {
   const intelSummary = alert.intel_summary || alert.rationale;
   const statusLockedBySystem = Boolean(alert.auto_closed_by_system);
   const isStatusClosed = String(alert.status || '').toLowerCase() === 'closed';
+  const normalizedStatus = String(alert.status || '').toLowerCase();
+  const canModifyStatus = !statusLockedBySystem && !isStatusClosed;
+  const showAcknowledged = canModifyStatus && normalizedStatus !== 'acknowledged';
+  const showInProgress = canModifyStatus && normalizedStatus !== 'in progress';
+  const showResolved = canModifyStatus && normalizedStatus !== 'resolved';
+  const isUpdatingStatus = Boolean(pendingStatus);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4" role="dialog" aria-modal="true">
@@ -145,14 +154,34 @@ const AlertModal = ({ alert, onClose, onRefresh }) => {
         <footer className="mt-6 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <span>Status: <span className={`font-semibold ${statusPalette[alert.status] || 'text-slate-300'}`}>{alert.status}</span></span>
           <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-            {!statusLockedBySystem && !isStatusClosed && (
+            {showAcknowledged && (
               <button
                 type="button"
-                onClick={acknowledge}
+                onClick={() => updateStatus('Acknowledged')}
                 className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-200 transition hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={pending}
+                disabled={isUpdatingStatus}
               >
-                {pending ? 'Updating...' : 'Acknowledge'}
+                {pendingStatus === 'Acknowledged' ? 'Updating...' : 'Acknowledge'}
+              </button>
+            )}
+            {showInProgress && (
+              <button
+                type="button"
+                onClick={() => updateStatus('In Progress')}
+                className="inline-flex items-center justify-center rounded-lg border border-indigo-500/60 px-3 py-2 font-semibold text-indigo-200 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isUpdatingStatus}
+              >
+                {pendingStatus === 'In Progress' ? 'Updating...' : 'Mark In Progress'}
+              </button>
+            )}
+            {showResolved && (
+              <button
+                type="button"
+                onClick={() => updateStatus('Resolved')}
+                className="inline-flex items-center justify-center rounded-lg border border-emerald-500/70 px-3 py-2 font-semibold text-emerald-200 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isUpdatingStatus}
+              >
+                {pendingStatus === 'Resolved' ? 'Updating...' : 'Mark Resolved'}
               </button>
             )}
             <button
@@ -370,7 +399,8 @@ export default function AlertsTable() {
           >
             <option>All</option>
             <option>Open</option>
-            <option>Acknowledged</option>
+            <option>In Progress</option>
+              <option>Acknowledged</option>
             <option>Resolved</option>
           </select>
         </div>
@@ -529,3 +559,4 @@ export default function AlertsTable() {
     </section>
   );
 }
+
