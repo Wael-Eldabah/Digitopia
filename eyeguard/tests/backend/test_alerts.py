@@ -3,7 +3,10 @@
 def test_alert_status_update(client, auth_headers):
     alerts_response = client.get('/api/v1/alerts')
     assert alerts_response.status_code == 200
-    alert_id = alerts_response.json()[0]['id']
+    payload = alerts_response.json()
+    alert_list = payload['items'] if isinstance(payload, dict) else payload
+    assert alert_list, 'expected at least one alert in seed data'
+    alert_id = alert_list[0]['id']
 
     update_response = client.post(f'/api/v1/alerts/{alert_id}/status', json={'status': 'Acknowledged'}, headers=auth_headers)
     assert update_response.status_code == 200

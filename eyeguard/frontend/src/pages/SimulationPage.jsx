@@ -5,8 +5,8 @@ import SimulationTerminal from '../components/SimulationTerminal.jsx';
 import { SimulationContext } from '../context/SimulationContext.jsx';
 
 export default function SimulationPage() {
-  const { session, startSession, endSession, statusMessage } = useContext(SimulationContext);
-  const [form, setForm] = useState({ ip_address: '', hostname: '', traffic_gb: 1, device_type: 'Endpoint' });
+  const { session, startSession, endSession, statusMessage, setStatusMessage } = useContext(SimulationContext);
+  const [form, setForm] = useState(() => ({ ip_address: '', hostname: '', device_type: 'Endpoint' }));
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -20,9 +20,18 @@ export default function SimulationPage() {
     setSubmitting(true);
     setError('');
     try {
+      try {
+        const { data: blockStatus } = await axios.get('/api/blocklist/check', { params: { ip: form.ip_address } });
+        if (blockStatus?.blocked) {
+          setStatusMessage('IP is currently on the blocklist. Simulation will be blocked.');
+        } else {
+          setStatusMessage(null);
+        }
+      } catch (checkErr) {
+        setStatusMessage(null);
+      }
       const response = await axios.post('/api/v1/simulation/devices', {
         ...form,
-        traffic_gb: Number(form.traffic_gb),
       });
       startSession(response.data);
     } catch (err) {
@@ -68,7 +77,7 @@ export default function SimulationPage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 md:grid-cols-5 gap-4">
+      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="md:col-span-2">
           <label className="block text-xs text-slate-500 mb-1" htmlFor="ip_address">IP Address</label>
           <input
@@ -103,19 +112,6 @@ export default function SimulationPage() {
             className="w-full bg-slate-950 border border-slate-800 rounded-md px-3 py-2 text-sm"
           />
         </div>
-        <div>
-          <label className="block text-xs text-slate-500 mb-1" htmlFor="traffic_gb">Traffic (GB)</label>
-          <input
-            id="traffic_gb"
-            name="traffic_gb"
-            type="number"
-            min="0"
-            step="0.1"
-            value={form.traffic_gb}
-            onChange={handleChange}
-            className="w-full bg-slate-950 border border-slate-800 rounded-md px-3 py-2 text-sm"
-          />
-        </div>
         <div className="flex items-end">
           <button
             type="submit"
@@ -125,7 +121,7 @@ export default function SimulationPage() {
             {submitting ? 'Creating...' : 'Add Device'}
           </button>
         </div>
-        {error && <p className="md:col-span-5 text-xs text-rose-400">{error}</p>}
+        {error && <p className="md:col-span-4 text-xs text-rose-400">{error}</p>}
       </form>
 
       {session ? (

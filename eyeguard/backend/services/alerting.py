@@ -193,14 +193,20 @@ def severity_from_sources(source_results: Dict[str, Dict[str, Dict[str, int]]]) 
     vt_data = source_results.get("virustotal", {}).get("data", {})
     otx_data = source_results.get("otx", {}).get("data", {})
     abuse_data = source_results.get("abuseipdb", {}).get("data", {})
+    shodan_data = source_results.get("shodan", {}).get("data", {})
 
     vt_malicious = vt_data.get("malicious_count", 0)
     otx_pulses = otx_data.get("pulse_count", 0)
     abuse_score = abuse_data.get("abuse_score", 0)
+    shodan_risk = shodan_data.get("risk", 0)
+    shodan_ports = len(shodan_data.get("exposed_ports", []))
+    shodan_vulns = len(shodan_data.get("vulns", []))
 
-    if abuse_score >= 80 or vt_malicious >= 3:
+    if shodan_risk >= 90 or shodan_ports >= 8 or shodan_vulns >= 5 or vt_malicious >= 5 or abuse_score >= 95:
+        level = "critical"
+    elif abuse_score >= 80 or vt_malicious >= 3 or shodan_risk >= 70 or shodan_ports >= 5:
         level = "high"
-    elif vt_malicious >= 1 or otx_pulses >= 1 or abuse_score >= 50:
+    elif vt_malicious >= 1 or otx_pulses >= 1 or abuse_score >= 50 or shodan_risk >= 45:
         level = "medium"
     else:
         level = "low"
@@ -208,6 +214,8 @@ def severity_from_sources(source_results: Dict[str, Dict[str, Dict[str, int]]]) 
         "vt_malicious": vt_malicious,
         "otx_pulses": otx_pulses,
         "abuse_score": abuse_score,
+        "shodan_risk": shodan_risk,
+        "shodan_ports": shodan_ports,
     }
 
 
@@ -219,6 +227,10 @@ def build_alert_message(indicator: str, stats: Dict[str, int]) -> str:
         parts.append(f"OTX={stats['otx_pulses']}")
     if stats.get("abuse_score"):
         parts.append(f"Abuse={stats['abuse_score']}")
+    if stats.get("shodan_risk"):
+        parts.append(f"ShodanRisk={stats['shodan_risk']}")
+    if stats.get("shodan_ports"):
+        parts.append(f"Ports={stats['shodan_ports']}")
     detail = ", ".join(parts) if parts else "No high confidence telemetry"
     return f"Malicious indicator detected: {indicator} ({detail})"
 

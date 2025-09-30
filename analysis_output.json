@@ -1,0 +1,191 @@
+{
+  "run_id": "c662ffae-f891-4c04-b353-e36760daac9d",
+  "malicious_ip_count": 5,
+  "alerts": [
+    {
+      "indicator": "10.8.30.128",
+      "severity": "High",
+      "score": 26,
+      "severity_rationale": [
+        "ti_match",
+        "malware_signature",
+        "port_scan",
+        "beaconing"
+      ],
+      "attack_type": "beaconing_c2",
+      "type_confidence": 0.77,
+      "status": "open",
+      "auto_blocked": false,
+      "message": "beaconing c2 activity for 10.8.30.128: score 26; signals: ti_match, malware_signature, port_scan, beaconing; VT=1; Abuse=35; ShodanRisk=65",
+      "intel_sources": [
+        "shodan",
+        "virustotal",
+        "otx",
+        "shodan-tags"
+      ],
+      "severity_stats": {
+        "vt_malicious": 1,
+        "otx_pulses": 4,
+        "abuse_score": 35,
+        "shodan_risk": 65,
+        "shodan_ports": 3,
+        "score": 26,
+        "signal_summary": [
+          "ti_match",
+          "malware_signature",
+          "port_scan",
+          "beaconing"
+        ]
+      },
+      "packet_count": 110
+    },
+    {
+      "indicator": "10.8.30.2",
+      "severity": "High",
+      "score": 23,
+      "severity_rationale": [
+        "ti_match",
+        "malware_signature",
+        "port_scan"
+      ],
+      "attack_type": "malware_signature",
+      "type_confidence": 0.74,
+      "status": "open",
+      "auto_blocked": false,
+      "message": "malware signature activity for 10.8.30.2: score 23; signals: ti_match, malware_signature, port_scan; VT=1; Abuse=35; ShodanRisk=65",
+      "intel_sources": [
+        "shodan",
+        "virustotal",
+        "otx",
+        "shodan-tags"
+      ],
+      "severity_stats": {
+        "vt_malicious": 1,
+        "otx_pulses": 4,
+        "abuse_score": 35,
+        "shodan_risk": 65,
+        "shodan_ports": 3,
+        "score": 23,
+        "signal_summary": [
+          "ti_match",
+          "malware_signature",
+          "port_scan"
+        ]
+      },
+      "packet_count": 11
+    },
+    {
+      "indicator": "108.156.224.34",
+      "severity": "High",
+      "score": 21,
+      "severity_rationale": [
+        "ti_match",
+        "malware_signature",
+        "beaconing"
+      ],
+      "attack_type": "beaconing_c2",
+      "type_confidence": 0.74,
+      "status": "open",
+      "auto_blocked": false,
+      "message": "beaconing c2 activity for 108.156.224.34: score 21; signals: ti_match, malware_signature, beaconing; VT=1; Abuse=35; ShodanRisk=65",
+      "intel_sources": [
+        "shodan",
+        "virustotal",
+        "otx",
+        "shodan-tags"
+      ],
+      "severity_stats": {
+        "vt_malicious": 1,
+        "otx_pulses": 4,
+        "abuse_score": 35,
+        "shodan_risk": 65,
+        "shodan_ports": 3,
+        "score": 21,
+        "signal_summary": [
+          "ti_match",
+          "malware_signature",
+          "beaconing"
+        ]
+      },
+      "packet_count": 26
+    },
+    {
+      "indicator": "185.199.111.133",
+      "severity": "High",
+      "score": 21,
+      "severity_rationale": [
+        "ti_match",
+        "malware_signature",
+        "beaconing"
+      ],
+      "attack_type": "beaconing_c2",
+      "type_confidence": 0.74,
+      "status": "open",
+      "auto_blocked": false,
+      "message": "beaconing c2 activity for 185.199.111.133: score 21; signals: ti_match, malware_signature, beaconing; VT=1; Abuse=35; ShodanRisk=65",
+      "intel_sources": [
+        "shodan",
+        "virustotal",
+        "otx",
+        "shodan-tags"
+      ],
+      "severity_stats": {
+        "vt_malicious": 1,
+        "otx_pulses": 4,
+        "abuse_score": 35,
+        "shodan_risk": 65,
+        "shodan_ports": 3,
+        "score": 21,
+        "signal_summary": [
+          "ti_match",
+          "malware_signature",
+          "beaconing"
+        ]
+      },
+      "packet_count": 12
+    },
+    {
+      "indicator": "34.98.75.36",
+      "severity": "High",
+      "score": 21,
+      "severity_rationale": [
+        "ti_match",
+        "malware_signature",
+        "beaconing"
+      ],
+      "attack_type": "beaconing_c2",
+      "type_confidence": 0.74,
+      "status": "open",
+      "auto_blocked": false,
+      "message": "beaconing c2 activity for 34.98.75.36: score 21; signals: ti_match, malware_signature, beaconing; VT=1; Abuse=35; ShodanRisk=65",
+      "intel_sources": [
+        "shodan",
+        "virustotal",
+        "otx",
+        "shodan-tags"
+      ],
+      "severity_stats": {
+        "vt_malicious": 1,
+        "otx_pulses": 4,
+        "abuse_score": 35,
+        "shodan_risk": 65,
+        "shodan_ports": 3,
+        "score": 21,
+        "signal_summary": [
+          "ti_match",
+          "malware_signature",
+          "beaconing"
+        ]
+      },
+      "packet_count": 14
+    }
+  ],
+  "blocked_ips": [],
+  "dashboard_update": {
+    "status": "completed",
+    "progress": 100,
+    "malicious_ip_count": 5,
+    "generated_at": "2025-09-30T00:23:04.816389+00:00"
+  },
+  "errors": []
+}

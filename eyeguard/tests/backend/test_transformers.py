@@ -1,5 +1,5 @@
 ﻿"""Software-only simulation / demo — no real systems will be contacted or modified."""
-from backend.api_clients.transformers import transform_abuse, transform_otx, transform_vt
+from backend.api_clients.transformers import transform_abuse, transform_otx, transform_shodan, transform_vt
 
 
 def test_transform_vt_summary():
@@ -27,3 +27,17 @@ def test_transform_abuse_summary():
     result = transform_abuse(payload)
     assert result["abuse_score"] == 70
     assert "70" in result["summary"]
+
+def test_transform_shodan_summary():
+    payload = {
+        "data": {
+            "ports": [22, 3389, 445],
+            "tags": ["ransomware", "test"],
+            "vulns": ["CVE-2024-1234"],
+            "org": "ExampleOrg",
+        }
+    }
+    result = transform_shodan(payload)
+    assert result["risk"] >= 30
+    assert "Ports" in result["summary"]
+    assert result["tags"]

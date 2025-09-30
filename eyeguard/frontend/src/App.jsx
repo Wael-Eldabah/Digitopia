@@ -1,8 +1,9 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
-import React, { createContext, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from './components/Sidebar.jsx';
+import AuthContext, { authContextDefaults } from './context/AuthContext.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
@@ -14,20 +15,9 @@ import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
 import { SimulationProvider } from './context/SimulationContext.jsx';
+import { AlertsIndicatorProvider } from './context/AlertsIndicatorContext.jsx';
 import { hydrateUserProfile } from './utils/assets.js';
 
-export const AuthContext = createContext({
-  isAuthenticated: false,
-  token: null,
-  user: null,
-  isSubmitting: false,
-  managerPending: 0,
-  login: async () => {},
-  logout: () => {},
-  updateUser: () => {},
-  setManagerPending: () => {},
-  refreshProfile: async () => {},
-});
 
 function ProtectedLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -148,12 +138,15 @@ export default function App() {
           const count = await axios.get('/api/v1/settings/users/pending/count');
           setSession((prev) => ({ ...prev, managerPending: count.data?.pending ?? 0 }));
         } catch (error) {
-          // ignore count fetch issues in simulation
+          console.warn('Failed to fetch pending user count', error);
         }
       }
     } catch (error) {
+      const status = error?.response?.status;
       console.warn('Failed to refresh profile', error);
-      setSession({ token: null, user: null, managerPending: 0 });
+      if (status === 401) {
+        setSession({ token: null, user: null, managerPending: 0 });
+      }
     }
   };
 
@@ -167,6 +160,7 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const { data } = await axios.post('/api/v1/auth/login', credentials);
+      axios.defaults.headers.common['X-Eyeguard-Token'] = data.token;
       setSession({ token: data.token, user: hydrateUserProfile(data.user), managerPending: data.manager_pending_requests ?? 0 });
       return data;
     } finally {
@@ -194,6 +188,7 @@ export default function App() {
 
   const authValue = useMemo(
     () => ({
+      ...authContextDefaults,
       isAuthenticated: Boolean(session?.token),
       token: session?.token ?? null,
       user: session?.user ?? null,
@@ -211,7 +206,8 @@ export default function App() {
   return (
     <AuthContext.Provider value={authValue}>
       <SimulationProvider>
-        <Routes>
+        <AlertsIndicatorProvider>
+          <Routes>
           <Route path="/login" element={<LoginPage isSubmitting={isSubmitting} onLogin={login} />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot" element={<ForgotPasswordPage />} />
@@ -232,7 +228,8 @@ export default function App() {
             <Route path="search" element={<IPSearchPage />} />
           </Route>
           <Route path="*" element={<Navigate to={session?.token ? '/' : '/login'} replace />} />
-        </Routes>
+          </Routes>
+        </AlertsIndicatorProvider>
       </SimulationProvider>
     </AuthContext.Provider>
   );

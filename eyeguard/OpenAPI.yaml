@@ -148,7 +148,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [Open, Acknowledged, Resolved]
+            enum: [Open, Acknowledged, Resolved, Closed]
       responses:
         '200':
           description: Alert list
@@ -209,7 +209,7 @@ paths:
               properties:
                 status:
                   type: string
-                  enum: [Open, Acknowledged, Resolved]
+                  enum: [Open, Acknowledged, Resolved, Closed]
       responses:
         '200':
           description: Updated alert
@@ -630,6 +630,10 @@ components:
           type: string
         otx_summary:
           type: string
+        shodan_summary:
+          type: string
+        shodan_risk:
+          type: integer
         computed_verdict:
           type: object
           properties:

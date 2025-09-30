@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     source_ip INET NOT NULL,
     destination_ip INET,
     category TEXT NOT NULL,
-    severity TEXT NOT NULL CHECK (severity IN ('Low','Medium','High')),
+    severity TEXT NOT NULL CHECK (severity IN ('Low','Medium','High','Critical')),
     status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open','Acknowledged','Resolved')),
     origin_device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
     raised_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS file_snapshots (
 CREATE TABLE IF NOT EXISTS ip_reputation (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ip_address INET NOT NULL,
-    severity TEXT NOT NULL CHECK (severity IN ('Low','Medium','High')),
+    severity TEXT NOT NULL CHECK (severity IN ('Low','Medium','High','Critical')),
     recommended_action TEXT NOT NULL CHECK (recommended_action IN ('Notify','Monitor','Block')),
     verdict TEXT NOT NULL,
     rationale TEXT,
@@ -142,6 +142,6 @@ CREATE INDEX IF NOT EXISTS idx_abuse_reputation ON abuseipdb_responses(reputatio
 CREATE INDEX IF NOT EXISTS idx_api_log_lookup ON api_responses_log(lookup_id);
 CREATE INDEX IF NOT EXISTS idx_api_log_provider ON api_responses_log(provider);
 \nCREATE TABLE IF NOT EXISTS blocked_ips (\n    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n    ip INET NOT NULL UNIQUE,\n    blocked_by UUID REFERENCES users(id) ON DELETE SET NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n\nCREATE INDEX IF NOT EXISTS idx_blocked_ips_ip ON blocked_ips(ip);\n
-\nCREATE TABLE IF NOT EXISTS threat_alerts (\n    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n    user_id UUID REFERENCES users(id) ON DELETE CASCADE,\n    report_id UUID REFERENCES reports(id) ON DELETE CASCADE,\n    indicator TEXT NOT NULL,\n    severity TEXT NOT NULL CHECK (severity IN ('high','medium','low')),\n    message TEXT NOT NULL,\n    is_read BOOLEAN NOT NULL DEFAULT FALSE,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n\nCREATE INDEX IF NOT EXISTS idx_threat_alerts_user ON threat_alerts(user_id, is_read);\nCREATE INDEX IF NOT EXISTS idx_threat_alerts_report ON threat_alerts(report_id);\n
+\nCREATE TABLE IF NOT EXISTS threat_alerts (\n    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n    user_id UUID REFERENCES users(id) ON DELETE CASCADE,\n    report_id UUID REFERENCES reports(id) ON DELETE CASCADE,\n    indicator TEXT NOT NULL,\n    severity TEXT NOT NULL CHECK (severity IN ('critical','high','medium','low')),\n    message TEXT NOT NULL,\n    is_read BOOLEAN NOT NULL DEFAULT FALSE,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n\nCREATE INDEX IF NOT EXISTS idx_threat_alerts_user ON threat_alerts(user_id, is_read);\nCREATE INDEX IF NOT EXISTS idx_threat_alerts_report ON threat_alerts(report_id);\n
 
 \nCREATE TABLE IF NOT EXISTS activity_logs (\n    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n    user_id UUID REFERENCES users(id) ON DELETE SET NULL,\n    action TEXT NOT NULL,\n    target TEXT,\n    details JSONB DEFAULT '{}'::JSONB,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\n\nCREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id, created_at DESC);\n

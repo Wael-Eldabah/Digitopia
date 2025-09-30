@@ -1,6 +1,7 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
-import React, { useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import AuthContext from '../context/AuthContext.jsx';
 
 export default function LoginPage({ onLogin, isSubmitting = false }) {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -8,6 +9,13 @@ export default function LoginPage({ onLogin, isSubmitting = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
+  const { isAuthenticated } = useContext(AuthContext);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, from, navigate]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -23,7 +31,6 @@ export default function LoginPage({ onLogin, isSubmitting = false }) {
     try {
       setError('');
       await onLogin({ email: form.email, password: form.password });
-      navigate(from, { replace: true });
     } catch (err) {
       const message = err?.response?.data?.detail?.message || 'Unable to sign in with the provided credentials.';
       setError(message);

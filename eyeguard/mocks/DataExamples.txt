@@ -5,3 +5,9 @@
 {"provider": "otx", "ip": "198.51.100.25", "pulse_info": {"count": 1, "pulses": ["training"]}}
 {"provider": "abuseipdb", "ip": "192.0.2.10", "data": {"abuseConfidenceScore": 35, "totalReports": 12}}
 {"provider": "abuseipdb", "ip": "198.51.100.25", "data": {"abuseConfidenceScore": 5, "totalReports": 2}}
+{"provider": "shodan", "ip": "192.0.2.10", "data": {"ports": [22, 445, 3389], "tags": ["bruteforce", "ransomware"], "vulns": ["CVE-2023-1234"], "org": "Example Corp", "last_update": "2025-08-20T12:00:00Z"}}
+{"provider": "shodan", "ip": "198.51.100.25", "data": {"ports": [80, 443], "tags": ["web"], "vulns": [], "org": "Example Hosting", "last_update": "2025-08-19T08:30:00Z"}}
+{"provider": "virustotal", "ip": "8.8.8.8", "data": {"attributes": {"last_analysis_stats": {"malicious": 0, "suspicious": 0, "harmless": 80}, "reputation": 15}}}
+{"provider": "otx", "ip": "8.8.8.8", "pulse_info": {"count": 0, "pulses": []}}
+{"provider": "abuseipdb", "ip": "8.8.8.8", "data": {"abuseConfidenceScore": 0, "totalReports": 0}}
+{"provider": "shodan", "ip": "8.8.8.8", "data": {"ports": [53], "tags": ["dns", "public"], "vulns": [], "risk": 10, "org": "Google LLC", "last_update": "2025-08-01T00:00:00Z"}}

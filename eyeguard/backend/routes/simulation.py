@@ -160,7 +160,7 @@ async def add_simulation_device(payload: SimulationDeviceCreate) -> SimulationDe
             block_alert = _build_alert(device, "Blocklist Enforcement", "High", "Device IP is currently blocklisted.", action="Auto-block")
             _store_alert(block_alert, actor=actor)
             triggered_alerts.append(block_alert)
-        if severity == "High":
+        if severity in {"High", "Critical"}:
             blocked = True
             verdict_message = rationale or "Threat intelligence identified this IP as malicious."
             if not status_message:

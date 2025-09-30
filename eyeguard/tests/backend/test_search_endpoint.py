@@ -4,7 +4,7 @@ def test_search_returns_mock_data(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["ip"] == "192.0.2.10"
-    assert payload["computed_verdict"]["severity"] in {"Low", "Medium", "High"}
+    assert payload["computed_verdict"]["severity"] in {"Low", "Medium", "High", "Critical"}
     assert response.headers["X-Cache-Hit"] == "0"
 
     cached_response = client.get("/api/v1/search", params={"ip": "192.0.2.10"})

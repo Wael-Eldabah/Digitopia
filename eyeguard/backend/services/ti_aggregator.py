@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 from ..api_clients.abuse import AbuseIPDBClient
 from ..api_clients.base import ThreatClientError
 from ..api_clients.otx import OTXClient
-from ..api_clients.transformers import transform_abuse, transform_otx, transform_vt
+from ..api_clients.shodan import ShodanClient
+from ..api_clients.transformers import transform_abuse, transform_otx, transform_shodan, transform_vt
 from ..api_clients.vt import VirusTotalClient
 from ..cache import cache_provider
 from ..config import get_settings
@@ -130,16 +131,39 @@ def _summarise_abuse(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _evaluate_malicious(source_results: Dict[str, Dict[str, Any]]) -> Tuple[bool, List[str], str]:
+def _summarise_shodan(raw: Dict[str, Any]) -> Dict[str, Any]:
+    transformed = transform_shodan(raw)
+    return {
+        "exposed_ports": transformed.get("ports", []),
+        "tags": transformed.get("tags", []),
+        "vulns": transformed.get("vulns", []),
+        "risk": transformed.get("risk", 0),
+        "summary": transformed.get("summary", ""),
+        "organization": transformed.get("organization"),
+        "services": transformed.get("services", []),
+        "last_update": transformed.get("last_update"),
+    }
+
+
+def _evaluate_malicious(source_results: Dict[str, Dict[str, Any]]) -> Tuple[bool, List[str], str, Dict[str, Any]]:
     vt = source_results.get("virustotal", {})
     otx = source_results.get("otx", {})
     abuse = source_results.get("abuseipdb", {})
+    shodan = source_results.get("shodan", {})
 
     malicious_sources: List[str] = []
     vt_malicious = vt.get("data", {}).get("malicious_count", 0)
     otx_pulses = otx.get("data", {}).get("pulse_count", 0)
     abuse_score = abuse.get("data", {}).get("abuse_score", 0)
+    shodan_data = shodan.get("data", {})
+    shodan_risk = shodan_data.get("risk", 0)
+    exposed_ports = shodan_data.get("exposed_ports", [])
+    shodan_tags = shodan_data.get("tags", [])
 
+    if shodan_risk >= 85 or len(exposed_ports) >= 6:
+        malicious_sources.append("shodan-critical")
+    elif shodan_risk >= 60 or len(exposed_ports) >= 3:
+        malicious_sources.append("shodan")
     if vt_malicious >= 3 or abuse_score >= 90:
         malicious_sources.append("high-confidence")
     if vt_malicious >= 1:
@@ -148,8 +172,17 @@ def _evaluate_malicious(source_results: Dict[str, Dict[str, Any]]) -> Tuple[bool
         malicious_sources.append("otx")
     if abuse_score >= 50:
         malicious_sources.append("abuseipdb")
+    if shodan_tags:
+        malicious_sources.append("shodan-tags")
 
-    is_malicious = bool(malicious_sources)
+    # deduplicate while preserving order
+    seen: set[str] = set()
+    ordered_sources: List[str] = []
+    for source in malicious_sources:
+        if source not in seen:
+            seen.add(source)
+            ordered_sources.append(source)
+
     summary_parts = []
     if vt_malicious:
         summary_parts.append(f"VT malicious={vt_malicious}")
@@ -157,8 +190,19 @@ def _evaluate_malicious(source_results: Dict[str, Dict[str, Any]]) -> Tuple[bool
         summary_parts.append(f"OTX pulses={otx_pulses}")
     if abuse_score:
         summary_parts.append(f"Abuse score={abuse_score}")
+    if shodan_risk:
+        summary_parts.append(f"Shodan risk={shodan_risk}")
+    if exposed_ports:
+        summary_parts.append(f"Ports={len(exposed_ports)} exposed")
     summary_text = "; ".join(summary_parts) if summary_parts else "No malicious indicators detected."
-    return is_malicious, malicious_sources, summary_text
+
+    shodan_context = {
+        "risk": shodan_risk,
+        "exposed_ports": exposed_ports,
+        "tags": shodan_tags,
+    }
+    is_malicious = bool(ordered_sources)
+    return is_malicious, ordered_sources, summary_text, shodan_context
 
 
 async def lookup_indicator(
@@ -195,25 +239,31 @@ async def lookup_indicator(
     vt_key = overrides.get("vt_api_key") or settings.vt_api_key
     otx_key = overrides.get("otx_api_key") or settings.otx_api_key
     abuse_key = overrides.get("abuse_api_key") or settings.abuse_api_key
+    shodan_key = overrides.get("shodan_api_key") or settings.shodan_api_key
 
     missing_keys: List[str] = []
     vt_raw: Dict[str, Any]
     otx_raw: Dict[str, Any]
     abuse_raw: Dict[str, Any]
+    shodan_raw: Dict[str, Any]
 
     if indicator_type == "ip":
         vt_client = VirusTotalClient(vt_key)
         otx_client = OTXClient(otx_key)
         abuse_client = AbuseIPDBClient(abuse_key)
+        shodan_client = ShodanClient(shodan_key)
         vt_raw = await _safe_fetch(vt_client, normalised) if vt_key else vt_client.load_mock(normalised)
         otx_raw = await _safe_fetch(otx_client, normalised) if otx_key else otx_client.load_mock(normalised)
         abuse_raw = await _safe_fetch(abuse_client, normalised) if abuse_key else abuse_client.load_mock(normalised)
+        shodan_raw = await _safe_fetch(shodan_client, normalised) if shodan_key else shodan_client.load_mock(normalised)
         if not vt_key:
             missing_keys.append("VT_API_KEY")
         if not otx_key:
             missing_keys.append("OTX_API_KEY")
         if not abuse_key:
             missing_keys.append("ABUSE_API_KEY")
+        if not shodan_key:
+            missing_keys.append("SHODAN_API_KEY")
     else:
         # For domain/url we use lightweight simulated payloads to avoid outbound calls.
         vt_raw = {
@@ -226,23 +276,32 @@ async def lookup_indicator(
         }
         otx_raw = {"pulse_info": {"count": 0, "pulses": []}}
         abuse_raw = {"data": {"abuseConfidenceScore": 0, "totalReports": 0}}
+        shodan_raw = {"data": {"ports": [], "tags": [], "vulns": [], "risk": 0}}
         if not vt_key:
             missing_keys.append("VT_API_KEY")
-        if indicator_type == "ip" and not otx_key:
+        if not otx_key:
             missing_keys.append("OTX_API_KEY")
+        if not shodan_key:
+            missing_keys.append("SHODAN_API_KEY")
+        if not abuse_key:
+            missing_keys.append("ABUSE_API_KEY")
         missing_keys = list({*missing_keys})
 
     source_results = {
         "virustotal": {"provider": "virustotal", "data": _summarise_vt(vt_raw)},
         "otx": {"provider": "otx", "data": _summarise_otx(otx_raw)},
         "abuseipdb": {"provider": "abuseipdb", "data": _summarise_abuse(abuse_raw)},
+        "shodan": {"provider": "shodan", "data": _summarise_shodan(shodan_raw)},
     }
 
-    is_malicious, malicious_sources, summary_text = _evaluate_malicious(source_results)
+    missing_keys = list(dict.fromkeys(missing_keys))
+
+    is_malicious, malicious_sources, summary_text, shodan_context = _evaluate_malicious(source_results)
     aggregated_summary = {
         "is_malicious": is_malicious,
         "malicious_sources": malicious_sources,
         "summary_text": summary_text,
+        "shodan_context": shodan_context,
     }
 
     result = AggregatedResult(

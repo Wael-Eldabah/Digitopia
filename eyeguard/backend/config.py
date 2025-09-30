@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     vt_api_key: str | None = Field(default=None, env="VT_API_KEY")
     otx_api_key: str | None = Field(default=None, env="OTX_API_KEY")
     abuse_api_key: str | None = Field(default=None, env="ABUSE_API_KEY")
+    shodan_api_key: str | None = Field(default=None, env="SHODAN_API_KEY")
     request_timeout_seconds: float = 5.0
     request_max_retries: int = 2
     rate_limit_per_minute: int = 30

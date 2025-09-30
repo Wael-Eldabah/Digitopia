@@ -93,6 +93,7 @@ async def update_integration_keys(
             vt_api_key=payload.vt_api_key,
             otx_api_key=payload.otx_api_key,
             abuse_api_key=payload.abuse_api_key,
+            shodan_api_key=payload.shodan_api_key,
         )
         data = state_store.get_integration_keys()
     return IntegrationKeys(**data)

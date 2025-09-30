@@ -54,12 +54,15 @@ class Alert(BaseSchema):
     category: str
     severity: str
     status: str
+    auto_closed_by_system: bool = False
+    status_locked: bool = False
     rationale: Optional[str] = None
     action_taken: Optional[str] = None
     playbook: Optional[str] = None
     recommended_actions: List[str] = Field(default_factory=list)
     mitigation_steps: List[str] = Field(default_factory=list)
     intel_summary: Optional[str] = None
+    on_blocklist: bool = False
 
 
 class AlertCreate(BaseSchema):
@@ -173,6 +176,24 @@ class PcapUploadResponse(BaseSchema):
     alerts_triggered: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class PcapJobStatus(BaseSchema):
+    id: str
+    user_id: str
+    status: str
+    progress: int = 0
+    stage: Optional[str] = None
+    message: Optional[str] = None
+    report_ref: Optional[str] = None
+    alerts_generated: int = 0
+    total_ips: int = 0
+    filename: Optional[str] = None
+    blocked_ips: List[str] = Field(default_factory=list)
+    self_check: Dict[str, bool] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+
 class IndicatorSearchResponse(BaseSchema):
     ok: bool = True
     type: str
@@ -192,12 +213,29 @@ class BlocklistRequest(BaseSchema):
     ip: str
 
 
-class BlocklistResponse(BaseSchema):
-    ok: bool
+class BlocklistEntry(BaseSchema):
+    ip: str
+    blocked_by: Optional[str] = None
+    created_at: datetime
+
+
+class BlocklistSnapshot(BaseSchema):
+    count: int = 0
+    items: List[str] = Field(default_factory=list)
+    updated_at: datetime
+    details: List[BlocklistEntry] = Field(default_factory=list)
+
+
+class BlocklistResponse(BlocklistSnapshot):
+    pass
 
 
 class BlocklistStatusResponse(BaseSchema):
     blocked: bool
+
+
+class BlocklistListResponse(BlocklistSnapshot):
+    pass
 
 
 class SimulationStatePayload(BaseSchema):
@@ -223,12 +261,36 @@ class IntegrationKeys(BaseSchema):
     abuse_api_key: Optional[str] = None
 
 
+
+
+class PcapModelInsights(BaseSchema):
+    model_version: Optional[str] = None
+    attack_type: Optional[str] = None
+    severity: Optional[str] = None
+    risk_score: Optional[int] = None
+    confidence: Optional[float] = None
+    highlight_indicators: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    learning_signals: Dict[str, Any] = Field(default_factory=dict)
+
+
 class PcapAnalysisSummary(BaseSchema):
     id: str
     created_at: datetime
     has_alerts: bool
     summary: Dict[str, Any] = Field(default_factory=dict)
     source_file: Optional[str] = None
+    blocked_ips: List[str] = Field(default_factory=list)
+    malicious_indicators: List[str] = Field(default_factory=list)
+    model_insights: Optional[PcapModelInsights] = None
+    self_check: Dict[str, bool] = Field(default_factory=dict)
+    errors: List[str] = Field(default_factory=list)
+    detections: Dict[str, Any] = Field(default_factory=dict)
+    detection_counts: Dict[str, int] = Field(default_factory=dict)
+    dns_activity: List[Dict[str, Any]] = Field(default_factory=list)
+    tls_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    threat_intel_matches: List[Dict[str, Any]] = Field(default_factory=list)
+    threat_match_count: int = 0
 
 
 class PcapAnalysisDetail(PcapAnalysisSummary):
@@ -349,6 +411,9 @@ __all__ = [
     "BlocklistRequest",
     "BlocklistResponse",
     "BlocklistStatusResponse",
+    "BlocklistEntry",
+    "BlocklistSnapshot",
+    "BlocklistListResponse",
     "ComputedVerdict",
     "Device",
     "DeviceCreate",
@@ -364,8 +429,10 @@ __all__ = [
     "PasswordResetConfirmResponse",
     "PasswordResetResponse",
     "PcapAnalysisDetail",
+    "PcapModelInsights",
     "PcapAnalysisSummary",
     "PcapUploadResponse",
+    "PcapJobStatus",
     "ProfileUploadResponse",
     "Report",
     "ReportDetail",

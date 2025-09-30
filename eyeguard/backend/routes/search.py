@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api_clients.abuse import AbuseIPDBClient
 from ..api_clients.base import ThreatClientError
 from ..api_clients.otx import OTXClient
-from ..api_clients.transformers import transform_abuse, transform_otx, transform_vt
+from ..api_clients.shodan import ShodanClient
+from ..api_clients.transformers import transform_abuse, transform_otx, transform_shodan, transform_vt
 from ..api_clients.vt import VirusTotalClient
 from ..cache import cache_provider
 from ..config import get_settings
@@ -187,17 +188,19 @@ async def search_ip(ip: str, response: Response, db: AsyncSession = Depends(get_
 
     response.headers["X-Cache-Hit"] = "0"
     logger.info("intel.lookup_start", ip=normalized)
-    vt_raw, otx_raw, abuse_raw = await asyncio.gather(
+    vt_raw, otx_raw, abuse_raw, shodan_raw = await asyncio.gather(
         _safe_fetch(VirusTotalClient(settings.vt_api_key), normalized),
         _safe_fetch(OTXClient(settings.otx_api_key), normalized),
         _safe_fetch(AbuseIPDBClient(settings.abuse_api_key), normalized),
+        _safe_fetch(ShodanClient(settings.shodan_api_key), normalized),
     )
 
     vt_normalized = transform_vt(vt_raw)
     otx_normalized = transform_otx(otx_raw)
     abuse_normalized = transform_abuse(abuse_raw)
+    shodan_normalized = transform_shodan(shodan_raw)
 
-    severity, action, rationale = compute_verdict(vt_normalized, otx_normalized, abuse_normalized)
+    severity, action, rationale = compute_verdict(vt_normalized, otx_normalized, abuse_normalized, shodan_normalized)
 
     recent_alerts: list[dict[str, Any]] = []
     related_devices: list[Device] = []
@@ -210,6 +213,8 @@ async def search_ip(ip: str, response: Response, db: AsyncSession = Depends(get_
         "vt_summary": vt_normalized["summary"],
         "abuse_summary": abuse_normalized["summary"],
         "otx_summary": otx_normalized["summary"],
+        "shodan_summary": shodan_normalized.get("summary", ""),
+        "shodan_risk": shodan_normalized.get("risk", 0),
         "computed_verdict": {"severity": severity, "action": action},
         "rationale": rationale,
         "recent_alerts": recent_alerts,
@@ -230,11 +235,12 @@ def _build_source(provider: str, payload: dict[str, Any]) -> SourceIntel:
     return SourceIntel(provider=provider, data=payload)
 
 
-def _summarize_sources(vt: dict[str, Any], otx: dict[str, Any], abuse: dict[str, Any]) -> str:
+def _summarize_sources(vt: dict[str, Any], otx: dict[str, Any], abuse: dict[str, Any], shodan: dict[str, Any]) -> str:
     vt_line = f"VT malicious={vt.get('malicious_count', 0)} suspicious={vt.get('suspicious_count', 0)}"
     otx_line = f"OTX pulses={otx.get('pulse_count', 0)} references={otx.get('reference_count', 0)}"
     abuse_line = f"AbuseIPDB score={abuse.get('abuse_score', 0)} reports={abuse.get('total_reports', 0)}"
-    return "; ".join([vt_line, otx_line, abuse_line])
+    shodan_line = f"Shodan risk={shodan.get('risk', 0)} ports={len(shodan.get('exposed_ports', []))}"
+    return "; ".join([vt_line, otx_line, abuse_line, shodan_line])
 
 
 @ip_router.get("/search/ip", response_model=IpSearchResponse)
@@ -256,6 +262,7 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
     vt_key = overrides.get("vt_api_key") or settings.vt_api_key
     otx_key = overrides.get("otx_api_key") or settings.otx_api_key
     abuse_key = overrides.get("abuse_api_key") or settings.abuse_api_key
+    shodan_key = overrides.get("shodan_api_key") or settings.shodan_api_key
     missing: list[str] = []
     if not vt_key:
         missing.append("virustotal")
@@ -263,16 +270,20 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
         missing.append("otx")
     if not abuse_key:
         missing.append("abuseipdb")
+    if not shodan_key:
+        missing.append("shodan")
 
-    vt_raw, otx_raw, abuse_raw = await asyncio.gather(
+    vt_raw, otx_raw, abuse_raw, shodan_raw = await asyncio.gather(
         _safe_fetch(VirusTotalClient(vt_key), normalized),
         _safe_fetch(OTXClient(otx_key), normalized),
         _safe_fetch(AbuseIPDBClient(abuse_key), normalized),
+        _safe_fetch(ShodanClient(shodan_key), normalized),
     )
     vt_norm = transform_vt(vt_raw)
     otx_norm = transform_otx(otx_raw)
     abuse_norm = transform_abuse(abuse_raw)
-    severity, action, rationale = compute_verdict(vt_norm, otx_norm, abuse_norm)
+    shodan_norm = transform_shodan(shodan_raw)
+    severity, action, rationale = compute_verdict(vt_norm, otx_norm, abuse_norm, shodan_norm)
 
     malicious_sources: list[str] = []
     if vt_norm.get("malicious_count", 0):
@@ -281,10 +292,18 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
         malicious_sources.append("otx")
     if abuse_norm.get("abuse_score", 0) >= 50:
         malicious_sources.append("abuseipdb")
-    if severity == "High" and "high-confidence" not in malicious_sources:
+    shodan_risk = shodan_norm.get("risk", 0)
+    shodan_ports = len(shodan_norm.get("exposed_ports", []))
+    if shodan_risk >= 85 or shodan_ports >= 6:
+        malicious_sources.append("shodan-critical")
+    elif shodan_risk >= 60 or shodan_ports >= 3:
+        malicious_sources.append("shodan")
+    if severity in {"High", "Critical"} and "high-confidence" not in malicious_sources:
         malicious_sources.append("high-confidence")
 
-    summary_text = _summarize_sources(vt_norm, otx_norm, abuse_norm)
+    malicious_sources = list(dict.fromkeys(malicious_sources))
+
+    summary_text = _summarize_sources(vt_norm, otx_norm, abuse_norm, shodan_norm)
     alert_summaries: list[dict[str, Any]] = []
     device_summaries: list[dict[str, Any]] = []
     activity_timeline: list[dict[str, Any]] = []
@@ -320,7 +339,7 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
             }
             for entry in state_store.recent_activity_for_indicator(normalized)
         ][:10]
-        if severity == "High":
+        if severity in {"High", "Critical"}:
             state_store.record_threat_alert(
                 {
                     "id": str(uuid.uuid4()),
@@ -340,6 +359,7 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
             "virustotal": _build_source("virustotal", vt_norm),
             "otx": _build_source("otx", otx_norm),
             "abuseipdb": _build_source("abuseipdb", abuse_norm),
+            "shodan": _build_source("shodan", shodan_norm),
         },
         aggregated_summary=summary_text,
         missing_api_keys=missing,
@@ -363,7 +383,7 @@ async def simple_ip_lookup(ip: str) -> IpSearchResponse:
             "severity": severity,
         },
     )
-    if severity == "High":
+    if severity in {"High", "Critical"}:
         recipients = state_store.collect_global_alert_recipients()
         if recipients:
             lines = [

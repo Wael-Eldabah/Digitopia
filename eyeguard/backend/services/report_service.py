@@ -5,9 +5,14 @@ import json
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..logging_config import logger
+
+
+class DBUnavailable(RuntimeError):
+    """Raised when the backing database is unreachable."""
 
 
 async def log_activity(db: AsyncSession, user_id: Optional[str], action: str, target: Optional[str], details: Dict[str, Any]) -> None:
@@ -200,12 +205,38 @@ async def add_blocked_ip(db: AsyncSession, ip: str, blocked_by: str) -> None:
         ON CONFLICT (ip) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, created_at = NOW()
         """
     )
-    await db.execute(statement, {"ip": ip, "blocked_by": blocked_by})
+    try:
+        await db.execute(statement, {"ip": ip, "blocked_by": blocked_by})
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive
+        raise DBUnavailable('unable to persist blocklist entry') from exc
+
+
+async def list_blocked_ips(db: AsyncSession) -> List[Dict[str, Any]]:
+    statement = text("SELECT ip, blocked_by, created_at FROM blocked_ips ORDER BY created_at DESC")
+    try:
+        result = await db.execute(statement)
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive
+        raise DBUnavailable('unable to load blocklist entries') from exc
+    rows: List[Dict[str, Any]] = []
+    for record in result:
+        rows.append({"ip": record.ip, "blocked_by": str(record.blocked_by) if record.blocked_by is not None else None, "created_at": record.created_at})
+    return rows
+
+
+async def remove_blocked_ip(db: AsyncSession, ip: str) -> None:
+    statement = text("DELETE FROM blocked_ips WHERE ip = :ip")
+    try:
+        await db.execute(statement, {"ip": ip})
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive
+        raise DBUnavailable('unable to remove blocklist entry') from exc
 
 
 async def is_ip_blocked(db: AsyncSession, ip: str) -> bool:
     statement = text("SELECT 1 FROM blocked_ips WHERE ip = :ip LIMIT 1")
-    result = await db.execute(statement, {"ip": ip})
+    try:
+        result = await db.execute(statement, {"ip": ip})
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive
+        raise DBUnavailable('unable to check blocklist entry') from exc
     return result.scalar() is not None
 
 

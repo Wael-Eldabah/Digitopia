@@ -2,7 +2,7 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { AuthContext } from '../App.jsx';
+import AuthContext from '../context/AuthContext.jsx';
 import CreateIncidentModal from './CreateIncidentModal.jsx';
 
 const severityStyles = {
@@ -46,6 +46,8 @@ const AlertModal = ({ alert, onClose, onRefresh }) => {
   const guidance = Array.isArray(alert.recommended_actions) ? alert.recommended_actions : [];
   const mitigation = Array.isArray(alert.mitigation_steps) ? alert.mitigation_steps : [];
   const intelSummary = alert.intel_summary || alert.rationale;
+  const statusLockedBySystem = Boolean(alert.auto_closed_by_system);
+  const isStatusClosed = String(alert.status || '').toLowerCase() === 'closed';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4" role="dialog" aria-modal="true">
@@ -143,14 +145,16 @@ const AlertModal = ({ alert, onClose, onRefresh }) => {
         <footer className="mt-6 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <span>Status: <span className={`font-semibold ${statusPalette[alert.status] || 'text-slate-300'}`}>{alert.status}</span></span>
           <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-            <button
-              type="button"
-              onClick={acknowledge}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-200 transition hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={pending}
-            >
-              {pending ? 'Updating�' : 'Acknowledge'}
-            </button>
+            {!statusLockedBySystem && !isStatusClosed && (
+              <button
+                type="button"
+                onClick={acknowledge}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2 font-semibold text-slate-200 transition hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pending}
+              >
+                {pending ? 'Updating...' : 'Acknowledge'}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -351,6 +355,7 @@ export default function AlertsTable() {
             className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
           >
             <option>All</option>
+             <option>Critical</option>
             <option>High</option>
             <option>Medium</option>
             <option>Low</option>

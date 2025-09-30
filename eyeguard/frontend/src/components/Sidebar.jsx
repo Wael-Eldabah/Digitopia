@@ -1,7 +1,8 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { AuthContext } from '../App.jsx';
+import AuthContext from '../context/AuthContext.jsx';
+import { AlertsIndicatorContext } from '../context/AlertsIndicatorContext.jsx';
 import { resolveAssetUrl } from '../utils/assets.js';
 
 const navItems = [
@@ -73,6 +74,7 @@ const colorFromSeed = (seed = 'eyeguard') => {
 
 export default function Sidebar() {
   const { user, logout, managerPending } = React.useContext(AuthContext);
+  const { unseenAlerts } = React.useContext(AlertsIndicatorContext);
   const displayName = user?.display_name || user?.email || 'Analyst';
   const initials = initialsFromName(displayName, 'EG');
   const roleLabel = user?.role ? user.role.replace('_', ' ') : 'Guest';
@@ -99,7 +101,9 @@ export default function Sidebar() {
       <nav className="flex-1 px-5 py-6 space-y-1">
         {navItems.map((item) => {
           const isSettings = item.path === '/settings';
-          const showBadge = isSettings && user?.role === 'MANAGER' && managerPending > 0;
+          const isAlerts = item.path === '/alerts';
+          const showSettingsBadge = isSettings && user?.role === 'MANAGER' && managerPending > 0;
+          const showAlertsBadge = isAlerts && unseenAlerts > 0;
           return (
             <NavLink
               key={item.path}
@@ -117,9 +121,14 @@ export default function Sidebar() {
                 <span className="text-sky-300/80">{item.icon}</span>
                 <span>{item.label}</span>
               </span>
-              {showBadge && (
+              {showSettingsBadge && (
                 <span className="text-[11px] font-semibold text-slate-900 bg-emerald-400/90 px-2 py-0.5 rounded-full">
                   {managerPending}
+                </span>
+              )}
+              {showAlertsBadge && (
+                <span className="text-[11px] font-semibold text-slate-900 bg-rose-400/90 px-2 py-0.5 rounded-full">
+                  {unseenAlerts}
                 </span>
               )}
             </NavLink>

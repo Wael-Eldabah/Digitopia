@@ -63,8 +63,10 @@ class StateStore:
         self.threat_reports: Dict[str, Dict[str, Any]] = {}
         self.threat_alerts: Dict[str, Dict[str, Any]] = {}
         self.blocked_ips: Dict[str, Dict[str, Any]] = {}
+        self.blocklist_updated_at = datetime.utcnow()
         self.simulation_states: Dict[str, Dict[str, Any]] = {}
         self.pcap_analyses: Dict[str, Dict[str, Any]] = {}
+        self.pcap_jobs: Dict[str, Dict[str, Any]] = {}
         self.integration_keys: Dict[str, Optional[str]] = {}
         self.outbound_email_log: List[Dict[str, Any]] = []
         self.integration_revision = 0
@@ -338,6 +340,30 @@ class StateStore:
     def get_pcap_analysis(self, analysis_id: str) -> Optional[Dict[str, Any]]:
         return self.pcap_analyses.get(analysis_id)
 
+    def upsert_pcap_job(self, job: Dict[str, Any]) -> None:
+        self.pcap_jobs[job["id"]] = job
+
+    def update_pcap_job(self, job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        job = self.pcap_jobs.get(job_id)
+        if not job:
+            return None
+        job.update(updates)
+        job["updated_at"] = datetime.utcnow()
+        return job
+
+    def get_pcap_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        return self.pcap_jobs.get(job_id)
+
+    def remove_pcap_job(self, job_id: str) -> bool:
+        if job_id not in self.pcap_jobs:
+            return False
+        self.pcap_jobs.pop(job_id, None)
+        return True
+
+    def list_pcap_jobs(self, user_id: str) -> List[Dict[str, Any]]:
+        jobs = [entry for entry in self.pcap_jobs.values() if entry.get("user_id") == user_id]
+        return sorted(jobs, key=lambda item: item.get("created_at") or datetime.utcnow(), reverse=True)
+
     def record_threat_alert(self, alert: Dict[str, Any]) -> None:
         self.threat_alerts[alert["id"]] = alert
 
@@ -441,9 +467,112 @@ class StateStore:
             self.log_activity("settings", "integration.keys.update", {"changes": changed})
         return self.get_integration_keys()
 
-    def add_blocked_ip(self, ip: str, blocked_by: str) -> None:
-        self.blocked_ips[ip] = {"ip": ip, "blocked_by": blocked_by, "created_at": datetime.utcnow()}
-        self.log_activity(blocked_by, "blocklist.added", {"ip": ip})
+    def add_blocked_ip(self, ip: str, blocked_by: str | None) -> bool:
+        actor = blocked_by or 'system'
+        existing = self.blocked_ips.get(ip)
+        if existing:
+            if blocked_by and existing.get("blocked_by") != blocked_by:
+                existing["blocked_by"] = blocked_by
+            return False
+        created_at = datetime.utcnow()
+        self.blocked_ips[ip] = {"ip": ip, "blocked_by": blocked_by, "created_at": created_at}
+        self.blocklist_updated_at = created_at
+        self.log_activity(actor, "blocklist.added", {"ip": ip})
+        closed_alerts: List[str] = []
+        for alert_id, alert in list(self.alerts.items()):
+            if alert.source_ip == ip or alert.destination_ip == ip:
+                if alert.status == "Closed":
+                    continue
+                updated = apply_alert_guidance(
+                    alert.model_copy(
+                        update={"status": "Closed", "auto_closed_by_system": True, "status_locked": True}
+                    )
+                )
+                self.alerts[alert_id] = updated
+                closed_alerts.append(alert_id)
+                self.append_alert_event(
+                    alert_id,
+                    "Auto-closed due to blocklist",
+                    actor=actor,
+                    status=updated.status,
+                    severity=updated.severity,
+                )
+        if closed_alerts:
+            self.log_activity(actor, "blocklist.auto_close_alerts", {"ip": ip, "alert_ids": closed_alerts})
+        return True
+
+    def remove_blocked_ip(self, ip: str, removed_by: Optional[str] | None = None) -> bool:
+        if ip not in self.blocked_ips:
+            return False
+        self.blocked_ips.pop(ip, None)
+        self.blocklist_updated_at = datetime.utcnow()
+        if removed_by:
+            self.log_activity(removed_by, "blocklist.removed", {"ip": ip})
+        return True
+
+    def list_blocked_ips(self) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        for data in self.blocked_ips.values():
+            created_at = data.get("created_at")
+            if isinstance(created_at, str):
+                try:
+                    created_dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    created_dt = datetime.utcnow()
+            else:
+                created_dt = created_at or datetime.utcnow()
+            entries.append({"ip": data.get("ip"), "blocked_by": data.get("blocked_by"), "created_at": created_dt})
+        entries.sort(key=lambda item: item.get("created_at") or datetime.utcnow(), reverse=True)
+        return entries
+
+    def sync_blocked_ips(self, records: List[Dict[str, Any]]) -> None:
+        incoming: Dict[str, Dict[str, Any]] = {}
+        for entry in records:
+            ip_value = entry.get("ip")
+            if not ip_value:
+                continue
+            created_at = entry.get("created_at")
+            if isinstance(created_at, str):
+                try:
+                    created_dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    created_dt = datetime.utcnow()
+            elif isinstance(created_at, datetime):
+                created_dt = created_at
+            else:
+                created_dt = datetime.utcnow()
+            incoming[ip_value] = {
+                "ip": ip_value,
+                "blocked_by": entry.get("blocked_by"),
+                "created_at": created_dt,
+            }
+
+        current_ips = set(self.blocked_ips.keys())
+        incoming_ips = set(incoming.keys())
+
+        for ip in current_ips - incoming_ips:
+            self.remove_blocked_ip(ip)
+
+        for ip in incoming_ips - current_ips:
+            payload = incoming[ip]
+            added = self.add_blocked_ip(ip, payload.get("blocked_by"))
+            if added:
+                self.blocked_ips[ip]["created_at"] = payload.get("created_at")
+
+        for ip in incoming_ips & current_ips:
+            payload = incoming[ip]
+            entry = self.blocked_ips[ip]
+            entry["blocked_by"] = payload.get("blocked_by")
+            entry["created_at"] = payload.get("created_at")
+
+        if incoming_ips:
+            latest = max(
+                (self.blocked_ips[ip]["created_at"] for ip in incoming_ips if self.blocked_ips[ip].get("created_at")),
+                default=datetime.utcnow(),
+            )
+            self.blocklist_updated_at = latest
+        else:
+            self.blocklist_updated_at = datetime.utcnow()
 
     def is_ip_blocked(self, ip: str) -> bool:
         return ip in self.blocked_ips

@@ -19,11 +19,13 @@ def _clone_alert(alert: Alert) -> Alert:
     return Alert(**alert.model_dump())
 
 
-@router.get("/alerts", response_model=List[Alert])
+@router.get("/alerts")
 async def list_alerts(
     severity: str | None = Query(default=None),
     status: str | None = Query(default=None),
-) -> list[Alert]:
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+) -> dict[str, object]:
     async with state_store._lock:  # type: ignore[attr-defined]
         alerts = list(state_store.alerts.values())
         if severity:
@@ -31,8 +33,16 @@ async def list_alerts(
         if status:
             alerts = [alert for alert in alerts if alert.status == status]
         alerts.sort(key=lambda item: item.detected_at, reverse=True)
-        enriched = [apply_alert_guidance(alert) for alert in alerts]
-        return [_clone_alert(alert) for alert in enriched]
+        total = len(alerts)
+        start = (page - 1) * page_size
+        end = start + page_size
+        slice_alerts = alerts[start:end]
+        enriched: List[Alert] = []
+        for alert in slice_alerts:
+            guided = apply_alert_guidance(alert)
+            enriched.append(guided.model_copy(update={"on_blocklist": state_store.is_ip_blocked(guided.source_ip)}))
+        items = [_clone_alert(alert) for alert in enriched]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.post("/alerts", response_model=Alert, status_code=201)
@@ -58,7 +68,7 @@ async def get_alert(alert_id: str) -> AlertDetail:
         alert = state_store.alerts.get(alert_id)
         if not alert:
             raise HTTPException(status_code=404, detail={"error_code": "ALERT_NOT_FOUND", "message": "Alert not found"})
-        enriched = apply_alert_guidance(alert)
+        enriched = apply_alert_guidance(alert).model_copy(update={"on_blocklist": state_store.is_ip_blocked(alert.source_ip)})
         events = state_store.get_alert_history(alert_id)
         return AlertDetail(**enriched.model_dump(), events=events)
 
@@ -69,21 +79,30 @@ async def update_alert_status(
     payload: AlertStatusUpdate,
     current_user: User = Depends(get_current_user),
 ) -> Alert:
+    requested_status = str(payload.status or "").title()
     allowed = {"Open", "Acknowledged", "Resolved"}
-    if payload.status not in allowed:
-        raise HTTPException(status_code=400, detail={"error_code": "INVALID_STATUS", "message": "Unsupported status"})
+    if requested_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": "INVALID_STATUS", "message": "Unsupported status"},
+        )
 
     async with state_store._lock:  # type: ignore[attr-defined]
         alert = state_store.alerts.get(alert_id)
         if not alert:
             raise HTTPException(status_code=404, detail={"error_code": "ALERT_NOT_FOUND", "message": "Alert not found"})
-        updated = Alert(**{**alert.model_dump(), "status": payload.status})
+        if alert.status == "Closed":
+            raise HTTPException(
+                status_code=400,
+                detail={"error_code": "STATUS_LOCKED", "message": "Closed alerts are managed by automation and cannot be updated manually."},
+            )
+        updated = Alert(**{**alert.model_dump(), "status": requested_status})
         updated = apply_alert_guidance(updated)
         state_store.alerts[alert_id] = updated
         actor = current_user.display_name or current_user.email
         state_store.append_alert_event(
             alert_id,
-            f"Status changed to {payload.status}",
+            f"Status changed to {requested_status}",
             actor=actor,
             status=updated.status,
             severity=updated.severity,
