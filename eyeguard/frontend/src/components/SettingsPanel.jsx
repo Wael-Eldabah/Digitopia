@@ -80,7 +80,7 @@ export default function SettingsPanel() {
   const fileInputRef = useRef(null);
   const uploadObjectUrlRef = useRef(null);
   const [avatarAccent, setAvatarAccent] = useState(() => (resolveAssetUrl(user?.profile_image_url) ? '#1e293b' : pickAccentColor()));
-  const [integrationForm, setIntegrationForm] = useState({ vt_api_key: '', otx_api_key: '', abuse_api_key: '', shodan_api_key: '' });
+  const [integrationForm, setIntegrationForm] = useState({ vt_api_key: '', otx_api_key: '', abuse_api_key: '', shodan_api_key: '', mxtoolbox_api_key: '' });
   const [integrationFeedback, setIntegrationFeedback] = useState({ message: '', error: '' });
   const isManager = user?.role === 'MANAGER';
   const integrationQuery = useQuery({
@@ -99,6 +99,7 @@ export default function SettingsPanel() {
       { key: 'otx_api_key', label: 'AlienVault OTX', present: Boolean(source.otx_api_key) },
       { key: 'abuse_api_key', label: 'AbuseIPDB', present: Boolean(source.abuse_api_key) },
       { key: 'shodan_api_key', label: 'Shodan', present: Boolean(source.shodan_api_key) },
+      { key: 'mxtoolbox_api_key', label: 'MXToolbox', present: Boolean(source.mxtoolbox_api_key) },
     ];
   }, [integrationQuery.data]);
 
@@ -138,7 +139,7 @@ export default function SettingsPanel() {
 
   useEffect(() => {
     if (!isManager) {
-      setIntegrationForm({ vt_api_key: '', otx_api_key: '', abuse_api_key: '', shodan_api_key: '' });
+      setIntegrationForm({ vt_api_key: '', otx_api_key: '', abuse_api_key: '', shodan_api_key: '', mxtoolbox_api_key: '' });
       setIntegrationFeedback({ message: '', error: '' });
       return;
     }
@@ -148,6 +149,7 @@ export default function SettingsPanel() {
         otx_api_key: integrationQuery.data.otx_api_key || '',
         abuse_api_key: integrationQuery.data.abuse_api_key || '',
         shodan_api_key: integrationQuery.data.shodan_api_key || '',
+        mxtoolbox_api_key: integrationQuery.data.mxtoolbox_api_key || '',
       });
     }
   }, [isManager, integrationQuery.data]);
@@ -336,6 +338,7 @@ export default function SettingsPanel() {
         otx_api_key: updated.otx_api_key || '',
         abuse_api_key: updated.abuse_api_key || '',
         shodan_api_key: updated.shodan_api_key || '',
+        mxtoolbox_api_key: updated.mxtoolbox_api_key || '',
       });
       queryClient.setQueryData(['integration-keys'], updated);
       setIntegrationFeedback({ message: 'Threat intelligence API keys updated.', error: '' });
@@ -360,6 +363,7 @@ export default function SettingsPanel() {
       otx_api_key: integrationForm.otx_api_key || null,
       abuse_api_key: integrationForm.abuse_api_key || null,
       shodan_api_key: integrationForm.shodan_api_key || null,
+      mxtoolbox_api_key: integrationForm.mxtoolbox_api_key || null,
     });
   };
 
@@ -671,7 +675,7 @@ export default function SettingsPanel() {
             {missingIntegrations.length > 0 && (
               <p className="text-xs text-amber-300">Missing keys: {missingIntegrations.map((item) => item.label).join(', ')}. Lookups will use mock telemetry until these keys are provided.</p>
             )}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               <div className="space-y-2">
                 <label className="text-xs uppercase tracking-wide text-slate-500">VirusTotal API Key</label>
                 <input
@@ -707,6 +711,16 @@ export default function SettingsPanel() {
                 <input
                   name="shodan_api_key"
                   value={integrationForm.shodan_api_key}
+                  onChange={handleIntegrationChange}
+                  className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide text-slate-500">MXToolbox API Key</label>
+                <input
+                  name="mxtoolbox_api_key"
+                  value={integrationForm.mxtoolbox_api_key}
                   onChange={handleIntegrationChange}
                   className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
                   placeholder="Optional"

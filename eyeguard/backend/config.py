@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     otx_api_key: str | None = Field(default=None, env="OTX_API_KEY")
     abuse_api_key: str | None = Field(default=None, env="ABUSE_API_KEY")
     shodan_api_key: str | None = Field(default=None, env="SHODAN_API_KEY")
+    mxtoolbox_api_key: str | None = Field(default=None, env="MXTOOLBOX_API_KEY")
     request_timeout_seconds: float = 5.0
     request_max_retries: int = 2
     rate_limit_per_minute: int = 30

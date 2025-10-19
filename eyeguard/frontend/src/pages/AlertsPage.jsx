@@ -1,6 +1,7 @@
 ﻿// Software-only simulation / demo - no real systems will be contacted or modified.
 import React from 'react';
 import AlertsTable from '../components/AlertsTable.jsx';
+import IncidentCampaigns from '../components/IncidentCampaigns.jsx';
 
 export default function AlertsPage() {
   return (
@@ -9,6 +10,7 @@ export default function AlertsPage() {
         <h1 className="text-3xl font-semibold text-slate-100">Alerts & Incidents</h1>
         <p className="text-sm text-slate-400">Triaging queue for simulated detections and orchestrated response.</p>
       </header>
+      <IncidentCampaigns />
       <AlertsTable />
     </div>
   );

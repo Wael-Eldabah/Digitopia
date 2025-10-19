@@ -1,5 +1,6 @@
 // Software-only simulation / demo - no real systems will be contacted or modified.
 import React, { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import NetworkMap from "../components/NetworkMap.jsx";
@@ -12,7 +13,28 @@ const fetchDevices = async () => {
   return response.data;
 };
 
+const fetchForecast = async () => {
+  const { data } = await axios.get("/api/v1/predictions/forecast", { params: { horizon_hours: 24 } });
+  return data;
+};
 
+const confidenceChipStyles = {
+  High: "bg-emerald-500/15 text-emerald-200 border border-emerald-400/40",
+  Medium: "bg-amber-500/15 text-amber-200 border border-amber-400/40",
+  Low: "bg-slate-700/40 text-slate-200 border border-slate-600/40",
+};
+
+const trendLabels = {
+  Increasing: "Rising risk trajectory",
+  Stable: "Risk trend holding steady",
+  Decreasing: "Risk easing",
+};
+
+const trendTextClasses = {
+  Increasing: "text-emerald-300",
+  Stable: "text-sky-300",
+  Decreasing: "text-amber-300",
+};
 export default function Dashboard() {
   const { data: devices = [], isLoading } = useQuery({
     queryKey: ["devices"],
@@ -20,6 +42,22 @@ export default function Dashboard() {
     refetchInterval: 1000,
     staleTime: 15000,
   });
+
+  const {
+    data: forecast,
+    isLoading: forecastLoading,
+    isError: forecastError,
+    error: forecastErrorData,
+    isFetching: forecastFetching,
+  } = useQuery({
+    queryKey: ["threat-forecast", "dashboard"],
+    queryFn: fetchForecast,
+    refetchInterval: 60000,
+    staleTime: 60000,
+  });
+
+  const topAsset = forecast?.high_risk_assets?.[0] || null;
+  const topSubnet = forecast?.high_risk_subnets?.[0] || null;
 
   const queryClient = useQueryClient();
   const [manualIp, setManualIp] = useState("");
@@ -260,6 +298,103 @@ export default function Dashboard() {
           EyeGuard sandbox.
         </p>
       </header>
+
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded-3xl border border-slate-800/70 bg-[#0d172a] p-5 space-y-3 shadow-[0_20px_45px_rgba(8,17,32,0.45)]">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-slate-100">Predictive risk index</h2>
+            {forecastFetching && <span className="text-[11px] text-slate-500">Syncing...</span>}
+          </div>
+          {forecastLoading ? (
+            <p className="text-sm text-slate-500">Calculating forecast from recent alerts...</p>
+          ) : forecastError ? (
+            <p className="text-sm text-amber-300">
+              {forecastErrorData?.response?.data?.detail?.message || forecastErrorData?.message || "Unable to load forecast."}
+            </p>
+          ) : !forecast ? (
+            <p className="text-sm text-slate-500">No predictive data yet. Generate more telemetry to train the model.</p>
+          ) : (
+            <>
+              <p className="text-3xl font-semibold text-slate-100">
+                {Number.isFinite(forecast.risk_index) ? forecast.risk_index.toFixed(1) : forecast.risk_index}
+              </p>
+              <p className={`text-xs font-semibold ${trendTextClasses[forecast.trend_direction] || trendTextClasses.Stable}`}>
+                {trendLabels[forecast.trend_direction] || trendLabels.Stable}
+              </p>
+              <div className="space-y-2">
+                <div className="relative h-2 rounded-full bg-slate-800/60">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-400"
+                    style={{ width: `${Math.min(100, Math.max(0, forecast.risk_index || 0))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>{new Date(forecast.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 font-semibold ${confidenceChipStyles[forecast.overall_confidence] || confidenceChipStyles.Low}`}>
+                    {forecast.overall_confidence} confidence
+                  </span>
+                </div>
+              </div>
+              <Link
+                to="/forecast"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-semibold text-sky-300 transition hover:bg-slate-800/60"
+              >
+                View full forecast
+              </Link>
+            </>
+          )}
+        </div>
+
+        <div className="rounded-3xl border border-slate-800/70 bg-[#101b30] p-5 space-y-3 shadow-[0_20px_45px_rgba(7,15,30,0.45)]">
+          <h3 className="text-sm font-semibold text-slate-100 uppercase tracking-wide">Projected high-risk asset</h3>
+          {forecastLoading ? (
+            <p className="text-sm text-slate-500">Digesting telemetry...</p>
+          ) : topAsset ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-slate-100">{topAsset.entity}</p>
+                  <p className="text-xs text-slate-500">{topAsset.predicted_vector}</p>
+                </div>
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${confidenceChipStyles[topAsset.confidence] || confidenceChipStyles.Low}`}>
+                  {topAsset.confidence}
+                </span>
+              </div>
+              <div className="space-y-1 text-xs text-slate-400">
+                <p>Risk score: <span className="font-semibold text-slate-200">{topAsset.risk_score}</span></p>
+                <p>{topAsset.rationale}</p>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">No elevated assets detected in the current horizon.</p>
+          )}
+        </div>
+
+        <div className="rounded-3xl border border-slate-800/70 bg-[#101b30] p-5 space-y-3 shadow-[0_20px_45px_rgba(7,15,30,0.45)]">
+          <h3 className="text-sm font-semibold text-slate-100 uppercase tracking-wide">Projected high-risk subnet</h3>
+          {forecastLoading ? (
+            <p className="text-sm text-slate-500">Correlating lateral movement indicators...</p>
+          ) : topSubnet ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-slate-100">{topSubnet.entity}</p>
+                  <p className="text-xs text-slate-500">{topSubnet.predicted_vector}</p>
+                </div>
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${confidenceChipStyles[topSubnet.confidence] || confidenceChipStyles.Low}`}>
+                  {topSubnet.confidence}
+                </span>
+              </div>
+              <div className="space-y-1 text-xs text-slate-400">
+                <p>Risk score: <span className="font-semibold text-slate-200">{topSubnet.risk_score}</span></p>
+                <p>{topSubnet.rationale}</p>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">No network segments trending hot yet.</p>
+          )}
+        </div>
+      </section>
 
       <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <div className="space-y-6">

@@ -82,9 +82,10 @@ def _create_device(device_id: str, ip: str, payload: SimulationDeviceCreate) -> 
     )
 
 
-def _store_alert(alert: Alert, actor: str = "simulation", event: str | None = None) -> None:
-    state_store.register_alert(alert, actor=actor, event=event or alert.category)
-    state_store.log_activity(actor, "simulation.alert", {"alert_id": alert.id, "category": alert.category})
+def _store_alert(alert: Alert, actor: str = "simulation", event: str | None = None) -> Alert:
+    registered = state_store.register_alert(alert, actor=actor, event=event or alert.category)
+    state_store.log_activity(actor, "simulation.alert", {"alert_id": registered.id, "category": registered.category})
+    return registered
 
 
 def _build_alert(device: Device, category: str, severity: str, rationale: str, action: str | None = None) -> Alert:
@@ -158,25 +159,25 @@ async def add_simulation_device(payload: SimulationDeviceCreate) -> SimulationDe
             blocked = True
             status_message = "Session blocked: IP is on the blocklist."
             block_alert = _build_alert(device, "Blocklist Enforcement", "High", "Device IP is currently blocklisted.", action="Auto-block")
-            _store_alert(block_alert, actor=actor)
-            triggered_alerts.append(block_alert)
+            stored_block_alert = _store_alert(block_alert, actor=actor)
+            triggered_alerts.append(stored_block_alert)
         if severity in {"High", "Critical"}:
             blocked = True
             verdict_message = rationale or "Threat intelligence identified this IP as malicious."
             if not status_message:
                 status_message = f"Threat intel verdict: {verdict_message}"
             alert = _build_alert(device, "Threat Intel Verdict", "High", rationale, action="Auto-block")
-            _store_alert(alert, actor=actor)
-            triggered_alerts.append(alert)
+            stored_alert = _store_alert(alert, actor=actor)
+            triggered_alerts.append(stored_alert)
         elif severity == "Medium":
             alert = _build_alert(device, "Threat Intel Verdict", "Medium", rationale, action="Monitor")
-            _store_alert(alert, actor=actor)
-            triggered_alerts.append(alert)
+            stored_alert = _store_alert(alert, actor=actor)
+            triggered_alerts.append(stored_alert)
 
         if payload.traffic_gb > 10:
             overload_alert = _build_alert(device, "Traffic Spike", "High", "Device exceeded 10GB traffic threshold.")
-            _store_alert(overload_alert, actor=actor)
-            triggered_alerts.append(overload_alert)
+            stored_overload = _store_alert(overload_alert, actor=actor)
+            triggered_alerts.append(stored_overload)
 
         if blocked:
             blocked_device = Device(**{**device.model_dump(), "status": "blocked"})
@@ -274,8 +275,8 @@ async def execute_terminal(request: TerminalCommandRequest) -> TerminalCommandRe
                 output = new_path
                 if new_path == "/private":
                     alert = _build_alert(device, "Restricted Access", "Medium", "Accessed protected directory /private.")
-                    _store_alert(alert, actor=actor)
-                    alerts.append(alert)
+                    stored_alert = _store_alert(alert, actor=actor)
+                    alerts.append(stored_alert)
         elif command in {"nano", "edit"}:
             if not args:
                 output = "Specify file to edit"
@@ -296,8 +297,8 @@ async def execute_terminal(request: TerminalCommandRequest) -> TerminalCommandRe
                         "Medium",
                         f"Edited {path}. Old hash {old_hash[:8]}, new hash {new_hash[:8]}",
                     )
-                    _store_alert(alert, actor=actor)
-                    alerts.append(alert)
+                    stored_alert = _store_alert(alert, actor=actor)
+                    alerts.append(stored_alert)
                     output = f"Edited {path}"
         elif command == "mv":
             if len(args) < 2:
@@ -315,8 +316,8 @@ async def execute_terminal(request: TerminalCommandRequest) -> TerminalCommandRe
                 files.pop(target, None)
                 state_store.file_hashes.pop(target, None)
                 alert = _build_alert(device, "File Removal", "Low", f"Removed {target}")
-                _store_alert(alert, actor=actor)
-                alerts.append(alert)
+                stored_alert = _store_alert(alert, actor=actor)
+                alerts.append(stored_alert)
                 output = f"Removed {target}"
         elif command == "ip":
             output = f"{device.ip_address}"

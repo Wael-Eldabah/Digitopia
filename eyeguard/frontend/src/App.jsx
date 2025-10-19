@@ -11,6 +11,9 @@ import SimulationPage from './pages/SimulationPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import IPSearchPage from './pages/IPSearchPage.jsx';
 import PcapAnalysisPage from './pages/PcapAnalysisPage.jsx';
+import MitreAttackPage from './pages/MitreAttackPage.jsx';
+import ThreatForecastPage from './pages/ThreatForecastPage.jsx';
+import PhishingAnalysisPage from './pages/PhishingAnalysisPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
@@ -208,26 +211,29 @@ export default function App() {
       <SimulationProvider>
         <AlertsIndicatorProvider>
           <Routes>
-          <Route path="/login" element={<LoginPage isSubmitting={isSubmitting} onLogin={login} />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/forgot" element={<ForgotPasswordPage />} />
-          <Route
-            path="/"
-            element={(
-              <ProtectedRoute>
-                <ProtectedLayout />
-              </ProtectedRoute>
-            )}
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="alerts" element={<AlertsPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="simulation" element={<SimulationPage />} />
-            <Route path="pcap" element={<PcapAnalysisPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="search" element={<IPSearchPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to={session?.token ? '/' : '/login'} replace />} />
+            <Route path="/login" element={<LoginPage isSubmitting={isSubmitting} onLogin={login} />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot" element={<ForgotPasswordPage />} />
+            <Route
+              path="/"
+              element={(
+                <ProtectedRoute>
+                  <ProtectedLayout />
+                </ProtectedRoute>
+              )}
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="alerts" element={<AlertsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="forecast" element={<ThreatForecastPage />} />
+              <Route path="phishing" element={<PhishingAnalysisPage />} />
+              <Route path="mitre" element={<MitreAttackPage />} />
+              <Route path="simulation" element={<SimulationPage />} />
+              <Route path="pcap" element={<PcapAnalysisPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="search" element={<IPSearchPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to={session?.token ? '/' : '/login'} replace />} />
           </Routes>
         </AlertsIndicatorProvider>
       </SimulationProvider>

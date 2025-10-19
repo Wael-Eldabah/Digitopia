@@ -43,6 +43,8 @@ async def login(payload: LoginRequest) -> LoginResponse:
         user = state_store.authenticate(payload.email, payload.password)
         if not user:
             raise HTTPException(status_code=401, detail={"error_code": "AUTH_FAILED", "message": "Invalid credentials"})
+        if user.status.lower() != "active":
+            raise HTTPException(status_code=403, detail={"error_code": "ACCOUNT_DISABLED", "message": "Account disabled"})
         token = state_store.issue_session_token(user.id)
         pending = len(state_store.pending_users) if user.role == "MANAGER" else None
     return LoginResponse(token=token, user=user, manager_pending_requests=pending)

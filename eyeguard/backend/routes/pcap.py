@@ -1920,18 +1920,18 @@ async def _process_pcap_job(job_id: str, current_user: User, output_path: str, s
                 auto_closed_by_system=bool(alert_entry.get("auto_closed_by_system")),
                 status_locked=bool(alert_entry.get("status_locked")),
             )
-            state_store.register_alert(alert, actor=actor, event="pcap.analysis.alert")
+            registered_alert = state_store.register_alert(alert, actor=actor, event="pcap.analysis.alert")
             alert_sources = alert_entry.get("intel_sources") or [alert_entry.get("severity", "info").lower()]
             state_store.record_threat_alert(
                 {
                     "id": str(uuid.uuid4()),
                     "user_id": current_user.id,
-                    "indicator": alert.source_ip,
+                    "indicator": registered_alert.source_ip,
                     "created_at": created_at,
-                    "severity": alert.severity,
+                    "severity": registered_alert.severity,
                     "sources": alert_sources,
-                    "recommended_action": alert.action_taken or (alert.playbook or "Review PCAP response playbook"),
-                    "rationale": alert.rationale,
+                    "recommended_action": registered_alert.action_taken or (registered_alert.playbook or "Review PCAP response playbook"),
+                    "rationale": registered_alert.rationale,
                     "severity_breakdown": alert_entry.get("stats"),
                     "is_read": False,
                 }

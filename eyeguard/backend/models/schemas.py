@@ -63,6 +63,8 @@ class Alert(BaseSchema):
     mitigation_steps: List[str] = Field(default_factory=list)
     intel_summary: Optional[str] = None
     on_blocklist: bool = False
+    incident_id: Optional[str] = None
+    incident_context: Optional[Dict[str, Any]] = None
 
 
 class AlertCreate(BaseSchema):
@@ -260,6 +262,7 @@ class IntegrationKeys(BaseSchema):
     otx_api_key: Optional[str] = None
     abuse_api_key: Optional[str] = None
     shodan_api_key: Optional[str] = None
+    mxtoolbox_api_key: Optional[str] = None
 
 
 
@@ -403,6 +406,87 @@ class ActivityLog(BaseSchema):
     created_at: datetime
 
 
+class IncidentTimelineEvent(BaseSchema):
+    timestamp: datetime
+    event: str
+    actor: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Incident(BaseSchema):
+    id: str
+    name: str
+    status: str
+    severity: str
+    alert_count: int
+    first_seen: datetime
+    last_seen: datetime
+    categories: List[str] = Field(default_factory=list)
+    source_ips: List[str] = Field(default_factory=list)
+    destination_ips: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    lead_alert_id: Optional[str] = None
+
+
+class IncidentDetail(Incident):
+    alerts: List[Alert] = Field(default_factory=list)
+    timeline: List[IncidentTimelineEvent] = Field(default_factory=list)
+
+
+class ForecastRiskPoint(BaseSchema):
+    timestamp: datetime
+    risk_score: float
+    confidence: str
+
+
+class PredictedEntityRisk(BaseSchema):
+    entity: str
+    entity_type: str
+    risk_score: float
+    confidence: str
+    predicted_vector: str
+    supporting_alerts: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
+
+
+class ThreatForecast(BaseSchema):
+    generated_at: datetime
+    horizon_hours: int
+    risk_index: float
+    overall_confidence: str
+    trend_direction: str
+    risk_trends: List[ForecastRiskPoint] = Field(default_factory=list)
+    high_risk_assets: List[PredictedEntityRisk] = Field(default_factory=list)
+    high_risk_subnets: List[PredictedEntityRisk] = Field(default_factory=list)
+
+
+class EmailPhishingIndicator(BaseSchema):
+    type: str
+    value: str
+    score: int
+    description: Optional[str] = None
+
+
+class EmailPhishingAnalysis(BaseSchema):
+    risk_score: int
+    risk_level: str
+    summary: str
+    indicators: List[EmailPhishingIndicator] = Field(default_factory=list)
+    heuristics: Dict[str, Any] = Field(default_factory=dict)
+    mx_findings: Dict[str, Any] = Field(default_factory=dict)
+    suggested_actions: List[str] = Field(default_factory=list)
+
+
+class EmailPhishingAnalysisResponse(EmailPhishingAnalysis):
+    alerts_created: List[str] = Field(default_factory=list)
+
+
+class EmailPhishingAnalysisRequest(BaseSchema):
+    raw_email: str
+    create_alert: bool = False
+    label: Optional[str] = None
+
+
 __all__ = [
     "ActivityLog",
     "Alert",
@@ -420,6 +504,16 @@ __all__ = [
     "DeviceCreate",
     "DeviceUpdate",
     "IndicatorSearchResponse",
+    "Incident",
+    "IncidentDetail",
+    "IncidentTimelineEvent",
+    "ForecastRiskPoint",
+    "PredictedEntityRisk",
+    "ThreatForecast",
+    "EmailPhishingIndicator",
+    "EmailPhishingAnalysis",
+    "EmailPhishingAnalysisResponse",
+    "EmailPhishingAnalysisRequest",
     "IntegrationKeys",
     "IpReputation",
     "IpSearchResponse",

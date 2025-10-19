@@ -7,11 +7,14 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from ..models.schemas import (
     ActivityLog,
     Alert,
+    Incident,
+    IncidentDetail,
+    IncidentTimelineEvent,
     Device,
     Report,
     SimulationDevice,
@@ -19,6 +22,16 @@ from ..models.schemas import (
     UserPreferences,
 )
 from ..services.alerting import apply_alert_guidance
+from ..services.threat_correlation import (
+    CORRELATION_THRESHOLD,
+    build_incident_summary,
+    compute_incident_similarity,
+    derive_incident_status,
+    extract_behavioral_tags,
+    highest_severity,
+    severity_label,
+    severity_rank,
+)
 
 STATIC_PROFILE_ROOT = os.path.join(os.path.dirname(__file__), "..", "static", "profile")
 
@@ -49,6 +62,9 @@ class StateStore:
         self.devices: Dict[str, Device] = {}
         self.alerts: Dict[str, Alert] = {}
         self.alert_audit: Dict[str, List[Dict[str, Any]]] = {}
+        self.incidents: Dict[str, Dict[str, Any]] = {}
+        self.incident_audit: Dict[str, List[Dict[str, Any]]] = {}
+        self.alert_to_incident: Dict[str, str] = {}
         self.reports: Dict[str, Report] = {}
         self.sessions: Dict[str, SimulationDevice] = {}
         self.session_context: Dict[str, Dict[str, Any]] = {}
@@ -172,10 +188,22 @@ class StateStore:
         user_id = self.session_tokens.get(token)
         if not user_id:
             return None
-        return self.users.get(user_id)
+        user = self.users.get(user_id)
+        if not user:
+            self.session_tokens.pop(token, None)
+            return None
+        if user.status.lower() != "active":
+            self.revoke_user_sessions(user_id)
+            return None
+        return user
 
     def revoke_session_token(self, token: str) -> None:
         self.session_tokens.pop(token, None)
+
+    def revoke_user_sessions(self, user_id: str) -> None:
+        for token, owner in list(self.session_tokens.items()):
+            if owner == user_id:
+                self.session_tokens.pop(token, None)
 
     def issue_password_reset_token(self, user_id: str) -> str:
         token = secrets.token_urlsafe(18)
@@ -208,13 +236,13 @@ class StateStore:
         self.users.pop(user_id, None)
         self.user_credentials.pop(user_id, None)
         self.profile_images.pop(user_id, None)
-        for token, owner in list(self.session_tokens.items()):
-            if owner == user_id:
-                self.session_tokens.pop(token, None)
+        self.revoke_user_sessions(user_id)
         self.log_activity(user_id, "user.deleted", {"user_id": user_id})
 
     def set_user_status(self, user_id: str, status: str) -> User:
         updated = self.update_user(user_id, status=status)
+        if updated.status.lower() != "active":
+            self.revoke_user_sessions(user_id)
         self.log_activity(user_id, "user.status.update", {"user_id": user_id, "status": status})
         return updated
 
@@ -275,7 +303,7 @@ class StateStore:
     # ------------------------------------------------------------------
     # Alert timeline helpers
     # ------------------------------------------------------------------
-    def register_alert(self, alert: Alert, actor: str, event: str) -> None:
+    def register_alert(self, alert: Alert, actor: str, event: str) -> Alert:
         enriched = apply_alert_guidance(alert)
         self.alerts[enriched.id] = enriched
         self.alert_audit[enriched.id] = [
@@ -287,8 +315,230 @@ class StateStore:
                 "severity": enriched.severity,
             }
         ]
-        if enriched.severity.lower() == "high":
-            self._notify_malicious_alert(enriched)
+        incident = self._link_alert_to_incident(enriched, actor=actor)
+        if incident:
+            updated_alert = self.alerts[enriched.id]
+            self.append_alert_event(
+                enriched.id,
+                f"Correlated with incident {incident['name']}",
+                actor=actor,
+                status=updated_alert.status,
+                severity=updated_alert.severity,
+            )
+        final_alert = self.alerts[enriched.id]
+        if final_alert.severity.lower() == "high":
+            self._notify_malicious_alert(final_alert)
+        return final_alert
+
+    def _default_incident_name(self, alert: Alert) -> str:
+        category = alert.category or "Threat"
+        if alert.source_ip:
+            return f"{category} Campaign [{alert.source_ip}]"
+        if alert.destination_ip:
+            return f"{category} Campaign → {alert.destination_ip}"
+        return f"{category} Campaign"
+
+    def _assign_alert_incident(self, alert_id: str, incident_id: str, context: Dict[str, Any]) -> Alert:
+        alert = self.alerts[alert_id]
+        payload = alert.model_dump()
+        payload["incident_id"] = incident_id
+        payload["incident_context"] = context
+        updated = Alert(**payload)
+        self.alerts[alert_id] = updated
+        self.alert_to_incident[alert_id] = incident_id
+        return updated
+
+    def _update_incident_metrics(self, incident_id: str) -> Optional[Dict[str, Any]]:
+        record = self.incidents.get(incident_id)
+        if not record:
+            return None
+        alert_ids: List[str] = record.get("alert_ids", [])
+        alerts = [self.alerts[alert_id] for alert_id in alert_ids if alert_id in self.alerts]
+        if not alerts:
+            record["alert_ids"] = []
+            record["alert_count"] = 0
+            record["status"] = "Closed"
+            record["summary"] = "No correlated alerts recorded for this incident yet."
+            record["severity_rank"] = severity_rank(record.get("severity"))
+            record["severity"] = severity_label(record["severity_rank"])
+            return record
+        first_seen = min(alert.detected_at for alert in alerts)
+        last_seen = max(alert.detected_at for alert in alerts)
+        record["first_seen"] = first_seen
+        record["last_seen"] = last_seen
+        record["alert_ids"] = [alert.id for alert in alerts]
+        record["alert_count"] = len(alerts)
+        categories: Set[str] = set()
+        categories_norm: Set[str] = set()
+        category_tokens: Set[str] = set()
+        source_ips: Set[str] = set()
+        destination_ips: Set[str] = set()
+        behavioural_tags: Set[str] = set()
+        for entry in alerts:
+            if entry.category:
+                categories.add(entry.category)
+                normalized = entry.category.strip().lower()
+                if normalized:
+                    categories_norm.add(normalized)
+                    category_tokens.update(token for token in normalized.split() if token)
+            if entry.source_ip:
+                source_ips.add(entry.source_ip)
+            if entry.destination_ip:
+                destination_ips.add(entry.destination_ip)
+            behavioural_tags.update(extract_behavioral_tags(entry))
+        record["categories"] = categories
+        record["categories_norm"] = categories_norm
+        record["category_tokens"] = category_tokens
+        record["source_ips"] = source_ips
+        record["destination_ips"] = destination_ips
+        record["behavioral_tags"] = behavioural_tags
+        top_severity = highest_severity(alerts)
+        record["severity"] = top_severity
+        record["severity_rank"] = severity_rank(top_severity)
+        record["status"] = derive_incident_status(alerts)
+        record["lead_alert_id"] = min(alerts, key=lambda item: item.detected_at).id
+        record["summary"] = build_incident_summary(record, alerts)
+        return record
+
+    def _build_incident_snapshot(self, incident_id: str) -> Optional[Incident]:
+        record = self._update_incident_metrics(incident_id)
+        if not record:
+            return None
+        return Incident(
+            id=incident_id,
+            name=record.get("name") or "Correlated Campaign",
+            status=record.get("status") or "Active",
+            severity=record.get("severity") or "Low",
+            alert_count=record.get("alert_count", len(record.get("alert_ids", []))),
+            first_seen=record.get("first_seen") or datetime.utcnow(),
+            last_seen=record.get("last_seen") or datetime.utcnow(),
+            categories=sorted(record.get("categories", [])),
+            source_ips=sorted(record.get("source_ips", [])),
+            destination_ips=sorted(record.get("destination_ips", [])),
+            summary=record.get("summary"),
+            lead_alert_id=record.get("lead_alert_id"),
+        )
+
+    def _propagate_incident_context(self, incident_id: str) -> Optional[Incident]:
+        snapshot = self._build_incident_snapshot(incident_id)
+        if not snapshot:
+            return None
+        context = {
+            "incident_id": snapshot.id,
+            "name": snapshot.name,
+            "status": snapshot.status,
+            "severity": snapshot.severity,
+            "alert_count": snapshot.alert_count,
+            "first_seen": snapshot.first_seen,
+            "last_seen": snapshot.last_seen,
+            "summary": snapshot.summary,
+            "source_ips": snapshot.source_ips,
+            "destination_ips": snapshot.destination_ips,
+            "categories": snapshot.categories,
+        }
+        record = self.incidents.get(snapshot.id, {})
+        for alert_id in record.get("alert_ids", []):
+            if alert_id not in self.alerts:
+                continue
+            self._assign_alert_incident(alert_id, snapshot.id, context)
+        return snapshot
+
+    def _create_incident_from_alert(self, alert: Alert, actor: str, alert_tags: Set[str]) -> Dict[str, Any]:
+        incident_id = str(uuid.uuid4())
+        record: Dict[str, Any] = {
+            "id": incident_id,
+            "name": self._default_incident_name(alert),
+            "status": "Active",
+            "severity": alert.severity,
+            "severity_rank": severity_rank(alert.severity),
+            "first_seen": alert.detected_at,
+            "last_seen": alert.detected_at,
+            "alert_ids": [alert.id],
+            "alert_count": 1,
+            "categories": {alert.category} if alert.category else set(),
+            "categories_norm": {alert.category.strip().lower()} if alert.category else set(),
+            "category_tokens": {token for token in (alert.category or "").strip().lower().split() if token},
+            "source_ips": {alert.source_ip} if alert.source_ip else set(),
+            "destination_ips": {alert.destination_ip} if alert.destination_ip else set(),
+            "behavioral_tags": set(alert_tags),
+            "lead_alert_id": alert.id,
+            "summary": None,
+        }
+        self.incidents[incident_id] = record
+        self.incident_audit[incident_id] = [
+            {
+                "timestamp": alert.detected_at,
+                "event": f"Incident created from alert {alert.category}",
+                "actor": actor,
+                "metadata": {"alert_id": alert.id, "severity": alert.severity},
+            }
+        ]
+        snapshot = self._propagate_incident_context(incident_id)
+        if snapshot:
+            self.append_incident_event(
+                incident_id,
+                "Incident initialized",
+                actor=actor,
+                metadata={"alert_id": alert.id},
+            )
+        return self.incidents[incident_id]
+
+    def _attach_alert_to_incident(self, incident_id: str, alert: Alert, actor: str, alert_tags: Set[str]) -> Dict[str, Any]:
+        record = self.incidents.get(incident_id)
+        if not record:
+            return self._create_incident_from_alert(alert, actor=actor, alert_tags=alert_tags)
+        record.setdefault("alert_ids", []).append(alert.id)
+        if alert.category:
+            record.setdefault("categories", set()).add(alert.category)
+            normalized = alert.category.strip().lower()
+            if normalized:
+                record.setdefault("categories_norm", set()).add(normalized)
+                record.setdefault("category_tokens", set()).update(token for token in normalized.split() if token)
+        if alert.source_ip:
+            record.setdefault("source_ips", set()).add(alert.source_ip)
+        if alert.destination_ip:
+            record.setdefault("destination_ips", set()).add(alert.destination_ip)
+        record.setdefault("behavioral_tags", set()).update(alert_tags)
+        snapshot = self._propagate_incident_context(incident_id)
+        if snapshot:
+            self.append_incident_event(
+                incident_id,
+                f"Alert {alert.category} linked",
+                actor=actor,
+                metadata={"alert_id": alert.id},
+            )
+        return self.incidents[incident_id]
+
+    def _link_alert_to_incident(self, alert: Alert, actor: str) -> Optional[Dict[str, Any]]:
+        alert_tags = extract_behavioral_tags(alert)
+        best_incident_id: Optional[str] = None
+        best_score = float("-inf")
+        for incident_id, record in self.incidents.items():
+            similarity = compute_incident_similarity(record, alert, alert_tags=alert_tags)
+            if similarity > best_score:
+                best_score = similarity
+                best_incident_id = incident_id
+        if best_incident_id and best_score >= CORRELATION_THRESHOLD:
+            record = self._attach_alert_to_incident(best_incident_id, alert, actor=actor, alert_tags=alert_tags)
+            self.append_incident_event(
+                best_incident_id,
+                f"Alert {alert.category} correlated (score {best_score:.2f})",
+                actor=actor,
+                metadata={"alert_id": alert.id, "score": round(best_score, 2)},
+            )
+            return record
+        return self._create_incident_from_alert(alert, actor=actor, alert_tags=alert_tags)
+
+    def append_incident_event(self, incident_id: str, event: str, actor: str, metadata: Optional[Dict[str, Any]] | None = None) -> None:
+        history = self.incident_audit.setdefault(incident_id, [])
+        history.append(
+            {
+                "timestamp": datetime.utcnow(),
+                "event": event,
+                "actor": actor,
+                "metadata": metadata or {},
+            }
+        )
     def append_alert_event(self, alert_id: str, event: str, actor: str, status: str, severity: str) -> None:
         history = self.alert_audit.setdefault(alert_id, [])
         history.append(
@@ -303,6 +553,57 @@ class StateStore:
 
     def get_alert_history(self, alert_id: str) -> List[Dict[str, Any]]:
         return self.alert_audit.get(alert_id, [])
+
+    def get_incident_history(self, incident_id: str) -> List[Dict[str, Any]]:
+        return self.incident_audit.get(incident_id, [])
+
+    def list_incidents(self) -> List[Incident]:
+        snapshots: List[Incident] = []
+        for incident_id in list(self.incidents.keys()):
+            snapshot = self._propagate_incident_context(incident_id)
+            if snapshot:
+                snapshots.append(snapshot)
+        snapshots.sort(key=lambda item: item.last_seen, reverse=True)
+        return snapshots
+
+    def get_incident_detail(self, incident_id: str) -> Optional[IncidentDetail]:
+        snapshot = self._propagate_incident_context(incident_id)
+        if not snapshot:
+            return None
+        record = self.incidents.get(incident_id, {})
+        alerts: List[Alert] = []
+        for alert_id in record.get("alert_ids", []):
+            alert = self.alerts.get(alert_id)
+            if not alert:
+                continue
+            alerts.append(apply_alert_guidance(alert))
+        timeline = [
+            IncidentTimelineEvent(
+                timestamp=entry.get("timestamp") or datetime.utcnow(),
+                event=entry.get("event", ""),
+                actor=entry.get("actor", "system"),
+                metadata=entry.get("metadata") or {},
+            )
+            for entry in self.incident_audit.get(incident_id, [])
+        ]
+        return IncidentDetail(**snapshot.model_dump(), alerts=alerts, timeline=timeline)
+
+    def incident_id_for_alert(self, alert_id: str) -> Optional[str]:
+        return self.alert_to_incident.get(alert_id)
+
+    def refresh_incident_for_alert(self, alert_id: str, actor: Optional[str] = None, reason: Optional[str] = None) -> None:
+        incident_id = self.alert_to_incident.get(alert_id)
+        if not incident_id:
+            return
+        snapshot = self._propagate_incident_context(incident_id)
+        if snapshot and reason:
+            self.append_incident_event(
+                incident_id,
+                reason,
+                actor=actor or "system",
+                metadata={"alert_id": alert_id},
+            )
+
     def find_alerts_by_ip(self, ip: str) -> List[Alert]:
         matches = [alert for alert in self.alerts.values() if alert.source_ip == ip or alert.destination_ip == ip]
         return [apply_alert_guidance(alert) for alert in matches]
@@ -456,19 +757,27 @@ class StateStore:
             "otx_api_key": self.integration_keys.get("otx_api_key"),
             "abuse_api_key": self.integration_keys.get("abuse_api_key"),
             "shodan_api_key": self.integration_keys.get("shodan_api_key"),
+            "mxtoolbox_api_key": self.integration_keys.get("mxtoolbox_api_key"),
         }
 
     def integration_keys_revision(self) -> int:
         return self.integration_revision
 
     def set_integration_keys(
-        self, *, vt_api_key: Optional[str] = None, otx_api_key: Optional[str] = None, abuse_api_key: Optional[str] = None, shodan_api_key: Optional[str] = None
+        self,
+        *,
+        vt_api_key: Optional[str] = None,
+        otx_api_key: Optional[str] = None,
+        abuse_api_key: Optional[str] = None,
+        shodan_api_key: Optional[str] = None,
+        mxtoolbox_api_key: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         payload = {
             "vt_api_key": vt_api_key.strip() if isinstance(vt_api_key, str) and vt_api_key.strip() else None,
             "otx_api_key": otx_api_key.strip() if isinstance(otx_api_key, str) and otx_api_key.strip() else None,
             "abuse_api_key": abuse_api_key.strip() if isinstance(abuse_api_key, str) and abuse_api_key.strip() else None,
             "shodan_api_key": shodan_api_key.strip() if isinstance(shodan_api_key, str) and shodan_api_key.strip() else None,
+            "mxtoolbox_api_key": mxtoolbox_api_key.strip() if isinstance(mxtoolbox_api_key, str) and mxtoolbox_api_key.strip() else None,
         }
         changed: Dict[str, str] = {}
         for key, value in payload.items():
@@ -513,6 +822,11 @@ class StateStore:
                     actor=actor,
                     status=updated.status,
                     severity=updated.severity,
+                )
+                self.refresh_incident_for_alert(
+                    alert_id,
+                    actor=actor,
+                    reason="Alert auto-closed due to blocklist",
                 )
         if closed_alerts:
             self.log_activity(actor, "blocklist.auto_close_alerts", {"ip": ip, "alert_ids": closed_alerts})

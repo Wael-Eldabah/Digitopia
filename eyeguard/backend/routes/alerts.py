@@ -57,9 +57,8 @@ async def create_alert(payload: AlertCreate, current_user: User = Depends(get_cu
             action_taken=None,
             **base_payload,
         )
-        alert = apply_alert_guidance(alert)
-        state_store.register_alert(alert, actor=current_user.display_name or current_user.email, event="Alert created")
-    return _clone_alert(alert)
+        registered = state_store.register_alert(alert, actor=current_user.display_name or current_user.email, event="Alert created")
+    return _clone_alert(registered)
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertDetail)
@@ -96,8 +95,8 @@ async def update_alert_status(
                 status_code=400,
                 detail={"error_code": "STATUS_LOCKED", "message": "Closed alerts are managed by automation and cannot be updated manually."},
             )
-        updated = Alert(**{**alert.model_dump(), "status": requested_status})
-        updated = apply_alert_guidance(updated)
+        payload = {**alert.model_dump(), "status": requested_status}
+        updated = apply_alert_guidance(Alert(**payload))
         state_store.alerts[alert_id] = updated
         actor = current_user.display_name or current_user.email
         state_store.append_alert_event(
@@ -107,4 +106,10 @@ async def update_alert_status(
             status=updated.status,
             severity=updated.severity,
         )
+        state_store.refresh_incident_for_alert(
+            alert_id,
+            actor=actor,
+            reason=f"Alert status changed to {requested_status}",
+        )
+        updated = state_store.alerts[alert_id]
     return _clone_alert(updated)
